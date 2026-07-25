@@ -1,15 +1,19 @@
 {
   "expo": {
-    "name": "discipline-ai",
+    "name": "Discipline AI",
     "slug": "discipline-ai",
     "version": "1.0.0",
+    "scheme": "discipline-ai",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
-    "userInterfaceStyle": "light",
+    "userInterfaceStyle": "automatic",
     "ios": {
-      "supportsTablet": true
+      "supportsTablet": true,
+      "bundleIdentifier": "com.disciplineai.app",
+      "usesAppleSignIn": true
     },
     "android": {
+      "package": "com.disciplineai.app",
       "adaptiveIcon": {
         "backgroundColor": "#E6F4FE",
         "foregroundImage": "./assets/android-icon-foreground.png",
@@ -20,6 +24,12 @@
     },
     "web": {
       "favicon": "./assets/favicon.png"
-    }
+    },
+    "plugins": [
+      "expo-web-browser",
+      "expo-secure-store",
+      "expo-notifications",
+      "expo-apple-authentication"
+    ]
   }
 }

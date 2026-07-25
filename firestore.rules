@@ -1,0 +1,60 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isOwner(uid) {
+      return isSignedIn() && request.auth.uid == uid;
+    }
+
+    function isAdmin() {
+      return isSignedIn() &&
+        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.isAdmin == true;
+    }
+
+    match /users/{userId} {
+      allow read, write: if isOwner(userId);
+      allow read: if isAdmin();
+
+      match /{subcollection}/{docId} {
+        allow read, write: if isOwner(userId);
+      }
+    }
+
+    match /settings/{userId} {
+      allow read, write: if isOwner(userId);
+    }
+
+    match /premium/{userId} {
+      allow read: if isOwner(userId);
+      allow write: if false;
+    }
+
+    match /analytics/{eventId} {
+      allow create: if isSignedIn() && request.resource.data.userId == request.auth.uid;
+      allow read: if isAdmin();
+    }
+
+    match /admin_crash_logs/{logId} {
+      allow create: if isSignedIn();
+      allow read, write: if isAdmin();
+    }
+
+    match /admin_feature_flags/{docId} {
+      allow read: if isSignedIn();
+      allow write: if isAdmin();
+    }
+
+    match /admin_feature_flags_push_queue/{docId} {
+      allow create: if isAdmin();
+      allow read: if isAdmin();
+    }
+
+    match /notifications/{notificationId} {
+      allow read, write: if isSignedIn() && resource.data.userId == request.auth.uid;
+      allow create: if isSignedIn() && request.resource.data.userId == request.auth.uid;
+    }
+  }
+}
