@@ -1,6 +1,6 @@
 # Discipline AI (Version 1)
 
-Cross-platform discipline coaching app (Android, iOS, Web) built with **Expo (React Native + React Native Web)**, **TypeScript**, **Material Design 3**, and **Firebase** as the sole backend.
+Cross-platform discipline coaching app (Android, iOS, Web) built with **Expo (React Native + React Native Web)**, **TypeScript**, **Material Design 3**, **Firebase Authentication**, and **Cloud Firestore**.
 
 ## Architecture
 
@@ -10,6 +10,7 @@ Cross-platform discipline coaching app (Android, iOS, Web) built with **Expo (Re
 - **Behaviour engine**: Every reminder action writes to `behaviour_events`; BDI computed in `services/bdiService.ts`
 - **AI V1**: Non-conversational, rule-based insights in `AI/insightsEngine.ts` (Cloud Functions mirror for scheduled reports)
 - **Local storage**: AsyncStorage cache only (`services/cacheService.ts`)
+- **Firebase Storage**: Disabled in Version 1; there are no file or profile-image uploads
 
 ## Firestore model (multi-tenant, sharded under user)
 
@@ -33,7 +34,7 @@ Cross-platform discipline coaching app (Android, iOS, Web) built with **Expo (Re
 
 1. Copy `.env.example` to `.env` and fill Firebase + Google OAuth client IDs.
 2. Enable **Email**, **Google**, and **Apple** auth in Firebase Console.
-3. Deploy rules: `firebase deploy --only firestore:rules,storage`
+3. Deploy Firestore rules and indexes: `firebase deploy --only firestore`
 4. Install functions: `cd functions && npm install && npm run build`
 5. Run app: `npm start` then `w` / `a` / `i`
 
@@ -41,7 +42,7 @@ Cross-platform discipline coaching app (Android, iOS, Web) built with **Expo (Re
 
 Implemented: auth, profile, dashboard, habits, goals, reminders (complete/skip/snooze), BDI, reports (daily summary / weekly / monthly / milestones), settings, push registration, admin panel shell, Cloud Functions for weekly reports & admin analytics.
 
-Architected but **disabled**: premium billing, PDF export, wearables, conversational AI.
+Architected but **disabled**: Firebase Storage/file uploads, premium billing, PDF export, wearables, conversational AI.
 
 ## Scripts
 

@@ -11,6 +11,7 @@ import {
 import { userRepository } from '../../database/userRepository';
 import { AuthStackParamList } from '../../navigation/types';
 import { emailSchema, passwordSchema } from '../../utils/validation';
+import { formatAuthError } from '../../utils/errors';
 import { isFirebaseConfigured } from '../../firebase/config';
 
 type Props = NativeStackScreenProps<AuthStackParamList, 'Login'>;
@@ -35,7 +36,7 @@ export function LoginScreen({ navigation }: Props) {
               user.displayName ?? '',
             );
           })
-          .catch((e) => setError(String(e)))
+          .catch((e) => setError(formatAuthError(e, 'Google sign-in failed')))
           .finally(() => setLoading(false));
       }
     }
@@ -43,14 +44,19 @@ export function LoginScreen({ navigation }: Props) {
 
   async function onLogin() {
     setError('');
+    const normalizedEmail = email.trim().toLowerCase();
     try {
-      emailSchema.parse(email);
+      emailSchema.parse(normalizedEmail);
       passwordSchema.parse(password);
       setLoading(true);
-      const user = await loginWithEmail(email.trim(), password);
-      await userRepository.ensureProfile(user.uid, user.email ?? email, user.displayName ?? '');
+      const user = await loginWithEmail(normalizedEmail, password);
+      await userRepository.ensureProfile(
+        user.uid,
+        user.email ?? normalizedEmail,
+        user.displayName ?? '',
+      );
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Login failed');
+      setError(formatAuthError(e, 'Login failed'));
     } finally {
       setLoading(false);
     }
@@ -65,7 +71,7 @@ export function LoginScreen({ navigation }: Props) {
         await userRepository.ensureProfile(user.uid, user.email ?? '', user.displayName ?? '');
       }
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Apple sign-in failed');
+      setError(formatAuthError(e, 'Apple sign-in failed'));
     } finally {
       setLoading(false);
     }

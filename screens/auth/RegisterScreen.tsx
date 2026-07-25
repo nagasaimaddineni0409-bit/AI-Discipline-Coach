@@ -6,6 +6,7 @@ import { registerWithEmail } from '../../firebase/auth';
 import { userRepository } from '../../database/userRepository';
 import { AuthStackParamList } from '../../navigation/types';
 import { emailSchema, passwordSchema } from '../../utils/validation';
+import { formatAuthError } from '../../utils/errors';
 
 type Props = NativeStackScreenProps<AuthStackParamList, 'Register'>;
 
@@ -18,15 +19,16 @@ export function RegisterScreen({ navigation }: Props) {
 
   async function onRegister() {
     setError('');
+    const normalizedEmail = email.trim().toLowerCase();
     try {
-      emailSchema.parse(email);
-      passwordSchema.parse(password);
       if (!displayName.trim()) throw new Error('Display name is required');
+      emailSchema.parse(normalizedEmail);
+      passwordSchema.parse(password);
       setLoading(true);
-      const user = await registerWithEmail(email.trim(), password, displayName.trim());
-      await userRepository.ensureProfile(user.uid, user.email ?? email, displayName.trim());
+      const user = await registerWithEmail(normalizedEmail, password, displayName.trim());
+      await userRepository.ensureProfile(user.uid, user.email ?? normalizedEmail, displayName.trim());
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Registration failed');
+      setError(formatAuthError(e, 'Registration failed'));
     } finally {
       setLoading(false);
     }

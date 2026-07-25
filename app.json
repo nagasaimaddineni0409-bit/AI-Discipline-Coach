@@ -14,6 +14,7 @@
     },
     "android": {
       "package": "com.disciplineai.app",
+      "googleServicesFile": "./google-services.json",
       "adaptiveIcon": {
         "backgroundColor": "#E6F4FE",
         "foregroundImage": "./assets/android-icon-foreground.png",
@@ -29,7 +30,8 @@
       "expo-web-browser",
       "expo-secure-store",
       "expo-notifications",
-      "expo-apple-authentication"
+      "expo-apple-authentication",
+      "expo-font"
     ]
   }
 }
