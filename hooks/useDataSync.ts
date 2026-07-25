@@ -12,6 +12,7 @@ import { useAuthStore } from '../features/auth/authStore';
 import { todayDateKey } from '../utils/date';
 import { calculateBdi, computeConsistency } from '../services/bdiService';
 import { cacheGet, cacheSet } from '../services/cacheService';
+import { ensureDailyTasksForHabits } from '../services/dailyTaskScheduler';
 import type { Habit, Goal, Task } from '../types';
 
 export function useDataSync() {
@@ -49,8 +50,11 @@ export function useDataSync() {
     hydrateCache();
     setSyncing(true);
 
-    const unsubHabits = habitRepository.subscribeByUser(uid, (habits) => {
+    const unsubHabits = habitRepository.subscribeByUser(uid, async (habits) => {
       setHabits(habits);
+      const dateKey = todayDateKey();
+      const existing = await taskRepository.listForDate(uid, dateKey);
+      await ensureDailyTasksForHabits(uid, habits, existing);
     });
     const unsubGoals = goalRepository.subscribeByUser(uid, (goals) => {
       setGoals(goals);
