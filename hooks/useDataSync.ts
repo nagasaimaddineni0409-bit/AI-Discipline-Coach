@@ -5,14 +5,19 @@ import {
   habitRepository,
   goalRepository,
   taskRepository,
-  reminderRepository,
   behaviourEventRepository,
 } from '../database/contentRepository';
 import { useAuthStore } from '../features/auth/authStore';
 import { todayDateKey } from '../utils/date';
-import { calculateBdi, computeConsistency } from '../services/bdiService';
+import {
+  calculateBdi,
+  computeConsistency,
+  buildDailyCompletionFlags,
+} from '../services/bdiService';
 import { cacheGet, cacheSet } from '../services/cacheService';
 import { ensureDailyTasksForHabits } from '../services/dailyTaskScheduler';
+import { reconcileTasksWithHabits } from '../services/habitLifecycle';
+import { refreshUpcomingReminder } from '../services/reminderActions';
 import type { Habit, Goal, Task } from '../types';
 
 export function useDataSync() {
@@ -52,45 +57,44 @@ export function useDataSync() {
 
     const unsubHabits = habitRepository.subscribeByUser(uid, async (habits) => {
       setHabits(habits);
-      const dateKey = todayDateKey();
-      const existing = await taskRepository.listForDate(uid, dateKey);
-      await ensureDailyTasksForHabits(uid, habits, existing);
+      const today = todayDateKey();
+      const existing = await taskRepository.listForDate(uid, today);
+      // Drop tasks for deleted / paused / archived habits so Dashboard stays in sync.
+      await reconcileTasksWithHabits(uid, habits, existing);
+      const remaining = await taskRepository.listForDate(uid, today);
+      await ensureDailyTasksForHabits(uid, habits, remaining);
+      if (!cancelled) await refreshUpcomingReminder(uid);
     });
     const unsubGoals = goalRepository.subscribeByUser(uid, (goals) => {
       setGoals(goals);
     });
-    const unsubTasks = taskRepository.subscribeToday(uid, dateKey, (tasks) => {
+    const unsubTasks = taskRepository.subscribeToday(uid, dateKey, async (tasks) => {
       setTasks(tasks);
+      if (!cancelled) await refreshUpcomingReminder(uid);
     });
 
     (async () => {
       try {
-        const [reminders, events] = await Promise.all([
-          reminderRepository.listUpcoming(uid, 1),
-          behaviourEventRepository.listRecent(uid, 90),
-        ]);
+        const events = await behaviourEventRepository.listRecent(uid, 90);
         if (cancelled) return;
-        setUpcomingReminder(reminders[0] ?? null);
         setBehaviourEvents(events);
+        await refreshUpcomingReminder(uid);
 
-        const weeklyFlags = buildDailyFlags(events, 7);
-        const monthlyFlags = buildDailyFlags(events, 30);
+        const weeklyFlags = buildDailyCompletionFlags(events, 7);
+        const monthlyFlags = buildDailyCompletionFlags(events, 30);
+        const goals = await goalRepository.listByUser(uid);
         const goalCompletion =
-          (await goalRepository.listByUser(uid)).filter((g) => g.progress >= g.target).length /
-          Math.max((await goalRepository.listByUser(uid)).length, 1);
+          goals.filter((g) => g.progress >= g.target).length / Math.max(goals.length, 1);
 
         const bdi = calculateBdi({
           events,
           goalCompletionRate: goalCompletion,
-          dailyImprovement: computeConsistency(buildDailyFlags(events, 2)) - 0.5,
-          weeklyImprovement: computeConsistency(weeklyFlags) - 0.5,
           weeklyConsistency: computeConsistency(weeklyFlags),
           monthlyConsistency: computeConsistency(monthlyFlags),
         });
         setBdi(bdi);
 
         const habits = await habitRepository.listByUser(uid);
-        const goals = await goalRepository.listByUser(uid);
         const tasks = await taskRepository.listForDate(uid, dateKey);
         await cacheSet(`data_${uid}_${dateKey}`, { habits, goals, tasks });
       } finally {
@@ -119,19 +123,4 @@ export function useDataSync() {
     setBdi,
     setSyncing,
   ]);
-}
-
-function buildDailyFlags(events: { createdAt: string; action: string }[], days: number): boolean[] {
-  const flags: boolean[] = [];
-  for (let i = days - 1; i >= 0; i--) {
-    const d = new Date();
-    d.setDate(d.getDate() - i);
-    const key = d.toISOString().slice(0, 10);
-    const dayEvents = events.filter((e) => e.createdAt.startsWith(key));
-    const completed = dayEvents.some(
-      (e) => e.action === 'completed' || e.action === 'completed_after_snooze',
-    );
-    flags.push(completed);
-  }
-  return flags;
 }

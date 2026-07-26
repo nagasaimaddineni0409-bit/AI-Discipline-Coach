@@ -9,21 +9,35 @@ export class UserRepository extends FirestoreRepository {
   }
 
   async ensureProfile(uid: string, email: string, displayName: string): Promise<UserProfile> {
-    const ref = this.docRef(COLLECTIONS.users, uid);
     const existing = await this.get<UserProfile>(COLLECTIONS.users, uid);
     const now = new Date().toISOString();
-    if (existing) return existing;
+    const emailLocal = email.split('@')[0] || 'User';
+    const nextName = displayName.trim();
+
+    if (existing) {
+      // Registration can race with onAuthStateChanged: the profile may be created
+      // first with the email prefix. Upgrade it once we have a real display name.
+      const isPlaceholder =
+        !existing.displayName ||
+        existing.displayName === emailLocal ||
+        existing.displayName === 'User';
+      if (nextName && nextName !== existing.displayName && isPlaceholder) {
+        await this.updateProfile(uid, { displayName: nextName });
+        return { ...existing, displayName: nextName, updatedAt: now };
+      }
+      return existing;
+    }
 
     const profile: UserProfile = {
       uid,
       email,
-      displayName: displayName || email.split('@')[0] || 'User',
+      displayName: nextName || emailLocal,
       createdAt: now,
       updatedAt: now,
       onboardingCompleted: false,
       isAdmin: false,
       premiumEnabled: false,
-      bdiScore: 50,
+      bdiScore: 0,
       bdiWeeklyDelta: 0,
       bdiMonthlyDelta: 0,
       currentStreakDays: 0,

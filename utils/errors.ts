@@ -15,6 +15,12 @@ const FIREBASE_AUTH_MESSAGES: Record<string, string> = {
   'auth/network-request-failed': 'Network error. Check your connection and try again.',
   'auth/operation-not-allowed': 'This sign-in method is not enabled for the project.',
   'auth/popup-closed-by-user': 'Sign-in was cancelled.',
+  'auth/popup-blocked': 'Pop-up was blocked. Allow pop-ups for this site and try again.',
+  'auth/cancelled-popup-request': 'Sign-in was cancelled.',
+  'auth/unauthorized-domain':
+    'This domain is not allowed for Google Sign-In. Add localhost in Firebase Console → Authentication → Settings → Authorized domains.',
+  'auth/requires-recent-login':
+    'For security, sign out and sign back in, then try deleting your account again.',
 };
 
 function hasCode(e: unknown): e is { code: string } {

@@ -1,139 +1,403 @@
-import React, { useEffect } from 'react';
-import { ScrollView, StyleSheet, Alert } from 'react-native';
-import { Button, List, Switch, Text } from 'react-native-paper';
+import React, { useEffect, useState } from 'react';
+import { Pressable, ScrollView, StyleSheet, View } from 'react-native';
+import {
+  Button,
+  Dialog,
+  Icon,
+  Portal,
+  Snackbar,
+  Switch,
+  Text,
+  useTheme,
+} from 'react-native-paper';
+import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { useAuthStore } from '../../features/auth/authStore';
 import { useSettingsStore } from '../../features/settings/settingsStore';
 import { logoutUser, deleteAuthUser } from '../../firebase/auth';
-import { userRepository } from '../../database/userRepository';
 import { cacheClearAll } from '../../services/cacheService';
 import { DEFAULT_FEATURE_FLAGS } from '../../constants/featureFlags';
+import { ScreenScaffold } from '../../components/ScreenScaffold';
+import { AppCard } from '../../components/AppCard';
+import { useBrandPalette } from '../../hooks/useBrandPalette';
+import { formatAuthError } from '../../utils/errors';
 import type { ThemeMode } from '../../types';
-import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { RootStackParamList } from '../../navigation/types';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'Settings'>;
 
+const THEME_OPTIONS: Array<{ id: ThemeMode; label: string; icon: string }> = [
+  { id: 'light', label: 'Light', icon: 'white-balance-sunny' },
+  { id: 'dark', label: 'Dark', icon: 'moon-waning-crescent' },
+  { id: 'system', label: 'System', icon: 'laptop' },
+];
+
 export function SettingsScreen({ navigation }: Props) {
+  const theme = useTheme();
+  const palette = useBrandPalette();
   const user = useAuthStore((s) => s.user);
   const profile = useAuthStore((s) => s.profile);
+  const setUser = useAuthStore((s) => s.setUser);
+  const setProfile = useAuthStore((s) => s.setProfile);
   const { settings, load, setTheme, patch } = useSettingsStore();
+
+  const [deleteOpen, setDeleteOpen] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  const [snack, setSnack] = useState<string | null>(null);
 
   useEffect(() => {
     if (user) load(user.uid);
   }, [user, load]);
 
-  async function onTheme(theme: ThemeMode) {
+  async function onTheme(next: ThemeMode) {
     if (!user) return;
-    await setTheme(user.uid, theme);
+    await setTheme(user.uid, next);
   }
 
   async function exportData() {
-    Alert.alert(
-      'Export queued',
-      'Data export will be delivered via Cloud Functions when premium export is enabled.',
-    );
+    setSnack('Export is queued. You will get a download when premium export is enabled.');
   }
 
-  async function deleteAccount() {
-    Alert.alert('Delete account', 'This permanently deletes your account and data.', [
-      { text: 'Cancel', style: 'cancel' },
-      {
-        text: 'Delete',
-        style: 'destructive',
-        onPress: async () => {
-          if (!user) return;
-          await userRepository.updateProfile(user.uid, { displayName: '[deleted]' });
-          await cacheClearAll();
-          await deleteAuthUser();
-        },
-      },
-    ]);
+  async function confirmDeleteAccount() {
+    if (!user) return;
+    setDeleting(true);
+    try {
+      // Deleting the auth account fires the purgeUserData Cloud Function, which
+      // recursively removes this user's Firestore data. We only clear the local
+      // cache and session once Firebase confirms the account is gone.
+      await deleteAuthUser();
+      await cacheClearAll();
+      setUser(null);
+      setProfile(null);
+      setDeleteOpen(false);
+    } catch (e) {
+      setSnack(formatAuthError(e, 'Could not delete account. Sign in again and retry.'));
+    } finally {
+      setDeleting(false);
+    }
   }
+
+  async function onSignOut() {
+    try {
+      await logoutUser();
+      setUser(null);
+      setProfile(null);
+    } catch (e) {
+      setSnack(formatAuthError(e, 'Could not sign out.'));
+    }
+  }
+
+  const activeTheme = settings?.theme ?? 'system';
+  const danger = theme.dark ? '#FCA5A5' : '#B3261E';
+  const onDanger = theme.dark ? '#1A0505' : '#FFFFFF';
 
   return (
-    <ScrollView contentContainerStyle={styles.container}>
-      <Text variant="titleMedium">Theme</Text>
-      <List.Item
-        title="Light"
-        onPress={() => onTheme('light')}
-        right={() => (settings?.theme === 'light' ? <List.Icon icon="check" /> : null)}
-      />
-      <List.Item
-        title="Dark"
-        onPress={() => onTheme('dark')}
-        right={() => (settings?.theme === 'dark' ? <List.Icon icon="check" /> : null)}
-      />
-      <List.Item
-        title="System"
-        onPress={() => onTheme('system')}
-        right={() => (settings?.theme === 'system' ? <List.Icon icon="check" /> : null)}
-      />
+    <ScreenScaffold>
+      <ScrollView contentContainerStyle={styles.container} keyboardShouldPersistTaps="handled">
+        <Text variant="headlineSmall" style={styles.pageTitle}>
+          Settings
+        </Text>
+        <Text variant="bodyMedium" style={[styles.pageSubtitle, { color: palette.textMuted }]}>
+          Appearance, reminders, and account
+        </Text>
 
-      <Text variant="titleMedium" style={styles.section}>
-        Notifications
-      </Text>
-      <List.Item
-        title="Enable notifications"
-        right={() => (
-          <Switch
+        <AppCard>
+          <Text variant="titleMedium" style={styles.cardTitle}>
+            Appearance
+          </Text>
+          <Text variant="bodySmall" style={[styles.cardHint, { color: palette.textMuted }]}>
+            Choose how Discipline AI looks on this device
+          </Text>
+          <View style={styles.themeRow}>
+            {THEME_OPTIONS.map((opt) => {
+              const selected = activeTheme === opt.id;
+              return (
+                <Button
+                  key={opt.id}
+                  mode={selected ? 'contained' : 'outlined'}
+                  icon={opt.icon}
+                  onPress={() => onTheme(opt.id)}
+                  style={[
+                    styles.themeChip,
+                    { borderColor: selected ? palette.accent : palette.cardBorder },
+                  ]}
+                  buttonColor={selected ? palette.accent : undefined}
+                  textColor={selected ? palette.onAccent : theme.colors.onSurface}
+                  contentStyle={styles.themeChipContent}
+                  compact
+                >
+                  {opt.label}
+                </Button>
+              );
+            })}
+          </View>
+        </AppCard>
+
+        <AppCard>
+          <Text variant="titleMedium" style={styles.cardTitle}>
+            Notifications
+          </Text>
+          <SettingToggle
+            title="Enable notifications"
+            subtitle="Reminders and discipline nudges"
             value={settings?.notificationsEnabled ?? true}
             onValueChange={(notificationsEnabled) => {
               if (user) void patch(user.uid, { notificationsEnabled });
             }}
           />
-        )}
-      />
-      <List.Item
-        title="Reminder sounds"
-        right={() => (
-          <Switch
+          <View style={[styles.divider, { backgroundColor: palette.divider }]} />
+          <SettingToggle
+            title="Reminder sounds"
+            subtitle="Play a tone when a reminder fires"
             value={settings?.reminderSoundsEnabled ?? true}
             onValueChange={(reminderSoundsEnabled) => {
               if (user) void patch(user.uid, { reminderSoundsEnabled });
             }}
           />
-        )}
-      />
+        </AppCard>
 
-      <Text variant="titleMedium" style={styles.section}>
-        Account
-      </Text>
-      <List.Item
-        title="Profile"
-        description={profile?.email}
-        onPress={() => navigation.navigate('Profile')}
-      />
-      <Button mode="outlined" onPress={exportData} style={styles.btn}>
-        Export data
-      </Button>
-      <Button mode="outlined" onPress={() => navigation.navigate('Privacy')} style={styles.btn}>
-        Privacy
-      </Button>
-      <Button mode="text" onPress={logoutUser} style={styles.btn}>
-        Sign out
-      </Button>
-      <Button mode="contained-tonal" buttonColor="#B00020" onPress={deleteAccount} style={styles.btn}>
-        Delete account
-      </Button>
+        <AppCard>
+          <Text variant="titleMedium" style={styles.cardTitle}>
+            Account
+          </Text>
+          <SettingRow
+            title="Profile"
+            subtitle={profile?.email ?? 'Manage your display name'}
+            icon="account-circle-outline"
+            onPress={() => navigation.navigate('Profile')}
+          />
+          <View style={[styles.divider, { backgroundColor: palette.divider }]} />
+          <SettingRow
+            title="Privacy"
+            subtitle="How we use your behaviour data"
+            icon="shield-lock-outline"
+            onPress={() => navigation.navigate('Privacy')}
+          />
+          <View style={[styles.divider, { backgroundColor: palette.divider }]} />
+          <SettingRow
+            title="Export data"
+            subtitle="Request a copy of your records"
+            icon="download-outline"
+            onPress={exportData}
+          />
+        </AppCard>
 
-      {profile?.isAdmin && DEFAULT_FEATURE_FLAGS.adminPanel ? (
-        <Button mode="contained" onPress={() => navigation.navigate('Admin')} style={styles.btn}>
-          Admin panel
-        </Button>
-      ) : null}
-    </ScrollView>
+        <AppCard>
+          <Text variant="titleMedium" style={styles.cardTitle}>
+            Session
+          </Text>
+          <Button
+            mode="outlined"
+            icon="logout"
+            onPress={onSignOut}
+            style={[styles.actionBtn, { borderColor: palette.cardBorder }]}
+            textColor={theme.colors.onSurface}
+            contentStyle={styles.actionBtnContent}
+          >
+            Sign out
+          </Button>
+          <Button
+            mode="contained"
+            icon="delete-forever"
+            onPress={() => setDeleteOpen(true)}
+            style={styles.actionBtn}
+            buttonColor={danger}
+            textColor={onDanger}
+            contentStyle={styles.actionBtnContent}
+          >
+            Delete account
+          </Button>
+        </AppCard>
+
+        {profile?.isAdmin && DEFAULT_FEATURE_FLAGS.adminPanel ? (
+          <AppCard>
+            <Text variant="titleMedium" style={styles.cardTitle}>
+              Admin
+            </Text>
+            <Button
+              mode="contained"
+              icon="shield-crown"
+              onPress={() => navigation.navigate('Admin')}
+              buttonColor={palette.accent}
+              textColor={palette.onAccent}
+              contentStyle={styles.actionBtnContent}
+            >
+              Open admin panel
+            </Button>
+          </AppCard>
+        ) : null}
+      </ScrollView>
+
+      <Portal>
+        <Dialog
+          visible={deleteOpen}
+          onDismiss={() => {
+            if (!deleting) setDeleteOpen(false);
+          }}
+          style={[styles.dialog, { backgroundColor: theme.colors.elevation.level3 }]}
+        >
+          <Dialog.Icon icon="alert-circle" color={danger} />
+          <Dialog.Title>Delete account?</Dialog.Title>
+          <Dialog.Content>
+            <Text variant="bodyMedium">
+              This permanently removes your account and local cache. Habits, goals, and history tied
+              to this login will no longer be available.
+            </Text>
+          </Dialog.Content>
+          <Dialog.Actions>
+            <Button onPress={() => setDeleteOpen(false)} disabled={deleting}>
+              Cancel
+            </Button>
+            <Button
+              textColor={danger}
+              loading={deleting}
+              disabled={deleting}
+              onPress={confirmDeleteAccount}
+            >
+              Delete
+            </Button>
+          </Dialog.Actions>
+        </Dialog>
+      </Portal>
+
+      <Snackbar
+        visible={Boolean(snack)}
+        onDismiss={() => setSnack(null)}
+        duration={4500}
+        action={{ label: 'OK', onPress: () => setSnack(null) }}
+      >
+        {snack}
+      </Snackbar>
+    </ScreenScaffold>
+  );
+}
+
+function SettingToggle({
+  title,
+  subtitle,
+  value,
+  onValueChange,
+}: {
+  title: string;
+  subtitle: string;
+  value: boolean;
+  onValueChange: (next: boolean) => void;
+}) {
+  const palette = useBrandPalette();
+  return (
+    <View style={styles.row}>
+      <View style={styles.rowText}>
+        <Text variant="bodyLarge">{title}</Text>
+        <Text variant="bodySmall" style={{ color: palette.textMuted }}>
+          {subtitle}
+        </Text>
+      </View>
+      <Switch value={value} onValueChange={onValueChange} color={palette.accent} />
+    </View>
+  );
+}
+
+function SettingRow({
+  title,
+  subtitle,
+  icon,
+  onPress,
+}: {
+  title: string;
+  subtitle: string;
+  icon: string;
+  onPress: () => void;
+}) {
+  const theme = useTheme();
+  const palette = useBrandPalette();
+  return (
+    <Pressable
+      onPress={onPress}
+      style={({ pressed }) => [styles.row, pressed && { opacity: 0.75 }]}
+      accessibilityRole="button"
+    >
+      <View
+        style={[
+          styles.rowIcon,
+          {
+            backgroundColor: theme.dark ? 'rgba(45,212,191,0.12)' : 'rgba(15,118,110,0.1)',
+          },
+        ]}
+      >
+        <Icon source={icon} size={20} color={palette.accentText} />
+      </View>
+      <View style={styles.rowText}>
+        <Text variant="bodyLarge">{title}</Text>
+        <Text variant="bodySmall" style={{ color: palette.textMuted }} numberOfLines={1}>
+          {subtitle}
+        </Text>
+      </View>
+      <Icon source="chevron-right" size={22} color={palette.textMuted} />
+    </Pressable>
   );
 }
 
 const styles = StyleSheet.create({
   container: {
     padding: 16,
-    paddingBottom: 40,
+    paddingBottom: 48,
+    gap: 4,
   },
-  section: {
-    marginTop: 16,
+  pageTitle: {
+    fontWeight: '700',
   },
-  btn: {
+  pageSubtitle: {
+    marginBottom: 12,
+  },
+  cardTitle: {
+    fontWeight: '700',
+    marginBottom: 4,
+  },
+  cardHint: {
+    marginBottom: 14,
+  },
+  themeRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+  },
+  themeChip: {
+    borderRadius: 14,
+    flexGrow: 1,
+  },
+  themeChipContent: {
+    height: 42,
+    paddingHorizontal: 4,
+  },
+  row: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: 12,
+    gap: 12,
+  },
+  rowIcon: {
+    width: 36,
+    height: 36,
+    borderRadius: 10,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  rowText: {
+    flex: 1,
+    gap: 2,
+  },
+  divider: {
+    height: StyleSheet.hairlineWidth,
+    marginLeft: 48,
+  },
+  actionBtn: {
     marginTop: 8,
+    borderRadius: 14,
+  },
+  actionBtnContent: {
+    height: 46,
+  },
+  dialog: {
+    borderRadius: 20,
   },
 });

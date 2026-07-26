@@ -1,5 +1,41 @@
-import type { Habit, Goal, Task, Reminder, HabitCategory, Priority } from '../types';
-import { generateId, todayDateKey } from '../utils/date';
+import type {
+  Habit,
+  Goal,
+  Task,
+  Reminder,
+  HabitCategory,
+  Priority,
+  RepeatRule,
+  ScheduleFrequency,
+} from '../types';
+import { generateId, todayDateKey, localDateTimeIso } from '../utils/date';
+
+export interface ScheduleInput {
+  frequency: ScheduleFrequency;
+  interval: number;
+  daysOfWeek: number[];
+  startDate: string;
+  endDate?: string | null;
+}
+
+function buildRepeatRule(input: ScheduleInput): RepeatRule {
+  const rule: RepeatRule = {
+    frequency: input.frequency,
+    interval: Math.max(1, input.interval || 1),
+    startDate: input.startDate,
+    endDate: input.endDate ?? null,
+  };
+  if (input.frequency === 'weekly') {
+    rule.daysOfWeek = input.daysOfWeek.length
+      ? input.daysOfWeek
+      : [new Date(input.startDate).getDay()];
+  }
+  if (input.frequency === 'monthly') {
+    const [, , d] = input.startDate.split('-').map(Number);
+    rule.dayOfMonth = d ?? 1;
+  }
+  return rule;
+}
 
 export function createTaskFromHabit(habit: Habit, dateKey = todayDateKey()): Task {
   const now = new Date().toISOString();
@@ -19,8 +55,12 @@ export function createTaskFromHabit(habit: Habit, dateKey = todayDateKey()): Tas
   };
 }
 
-export function createReminderFromTask(task: Task, toneId: string): Reminder {
-  const scheduledAt = `${task.scheduledDate}T${task.scheduledTime}:00.000Z`;
+export function createReminderFromTask(
+  task: Task,
+  toneId: string,
+  extras?: { customToneUri?: string | null; customToneName?: string | null },
+): Reminder {
+  const scheduledAt = localDateTimeIso(task.scheduledDate, task.scheduledTime);
   const now = new Date().toISOString();
   return {
     id: generateId(),
@@ -30,6 +70,8 @@ export function createReminderFromTask(task: Task, toneId: string): Reminder {
     description: task.description,
     scheduledAt,
     toneId,
+    customToneUri: extras?.customToneUri ?? null,
+    customToneName: extras?.customToneName ?? null,
     status: 'scheduled',
     createdAt: now,
     updatedAt: now,
@@ -48,8 +90,11 @@ export function buildHabitPayload(
     reminderTime: string;
     reminderEnabled: boolean;
     toneId: string;
+    customToneUri?: string | null;
+    customToneName?: string | null;
     color: string;
     icon: string;
+    schedule: ScheduleInput;
   },
   existing?: Habit,
 ): Habit {
@@ -67,13 +112,11 @@ export function buildHabitPayload(
       enabled: input.reminderEnabled,
       time: input.reminderTime,
       toneId: input.toneId,
+      customToneUri: input.customToneUri ?? null,
+      customToneName: input.customToneName ?? null,
       timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
     },
-    repeatRule: existing?.repeatRule ?? {
-      frequency: 'daily',
-      interval: 1,
-      daysOfWeek: [1, 2, 3, 4, 5, 6, 0],
-    },
+    repeatRule: buildRepeatRule(input.schedule),
     color: input.color,
     icon: input.icon,
     status: existing?.status ?? 'active',
@@ -98,11 +141,14 @@ export function buildGoalPayload(
     reminderTime: string;
     reminderEnabled: boolean;
     toneId: string;
+    customToneUri?: string | null;
+    customToneName?: string | null;
     color: string;
     icon: string;
     target: number;
     dueDate?: string | null;
     notes?: string;
+    schedule: ScheduleInput;
   },
   existing?: Goal,
 ): Goal {
@@ -121,12 +167,11 @@ export function buildGoalPayload(
       enabled: input.reminderEnabled,
       time: input.reminderTime,
       toneId: input.toneId,
+      customToneUri: input.customToneUri ?? null,
+      customToneName: input.customToneName ?? null,
       timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
     },
-    repeatRule: existing?.repeatRule ?? {
-      frequency: input.period,
-      interval: 1,
-    },
+    repeatRule: buildRepeatRule(input.schedule),
     progress: existing?.progress ?? 0,
     target: input.target,
     color: input.color,

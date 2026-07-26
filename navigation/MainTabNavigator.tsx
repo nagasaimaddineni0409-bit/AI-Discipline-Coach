@@ -1,4 +1,5 @@
 import React from 'react';
+import { Platform } from 'react-native';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import { IconButton } from 'react-native-paper';
@@ -8,22 +9,45 @@ import { GoalsScreen } from '../screens/main/GoalsScreen';
 import { ReportsScreen } from '../screens/main/ReportsScreen';
 import { MainTabParamList } from './types';
 import { useTheme } from 'react-native-paper';
+import { AUTH } from '../constants/theme';
 
 const Tab = createBottomTabNavigator<MainTabParamList>();
 
 export function MainTabNavigator() {
   const theme = useTheme();
+  const isDark = theme.dark;
+
   return (
     <Tab.Navigator
       screenOptions={({ route, navigation }) => ({
-        headerStyle: { backgroundColor: theme.colors.elevation.level2 },
+        headerStyle: {
+          backgroundColor: isDark ? AUTH.ink : theme.colors.elevation.level2,
+          borderBottomWidth: 1,
+          borderBottomColor: isDark ? AUTH.panelBorder : theme.colors.outline,
+          elevation: 0,
+          shadowOpacity: 0,
+        },
+        headerTitleStyle: {
+          fontWeight: '600',
+          color: isDark ? AUTH.cream : theme.colors.onSurface,
+        },
+        headerTintColor: isDark ? AUTH.cream : theme.colors.onSurface,
         headerRight: () => (
           <IconButton
             icon="cog"
+            iconColor={isDark ? AUTH.mist : theme.colors.onSurfaceVariant}
             onPress={() => navigation.getParent()?.navigate('Settings' as never)}
           />
         ),
-        tabBarActiveTintColor: theme.colors.primary,
+        tabBarStyle: {
+          backgroundColor: isDark ? AUTH.panelSolid : theme.colors.elevation.level2,
+          borderTopColor: isDark ? AUTH.panelBorder : theme.colors.outline,
+          borderTopWidth: 1,
+          height: Platform.OS === 'ios' ? 88 : 64,
+          paddingTop: 6,
+        },
+        tabBarActiveTintColor: isDark ? AUTH.tealSoft : theme.colors.primary,
+        tabBarInactiveTintColor: isDark ? AUTH.mist : theme.colors.onSurfaceVariant,
         tabBarIcon: ({ color, size }) => {
           const map: Record<keyof MainTabParamList, keyof typeof MaterialCommunityIcons.glyphMap> =
             {

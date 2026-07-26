@@ -5,62 +5,119 @@ import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { AppCard } from '../../components/AppCard';
 import { BdiCard } from '../../components/BdiCard';
 import { ProgressRing } from '../../components/ProgressRing';
-import { ReminderModal } from '../../components/ReminderModal';
 import { useDataStore } from '../../features/data/dataStore';
 import { useAuthStore } from '../../features/auth/authStore';
 import { MainTabParamList } from '../../navigation/types';
-import { completeTask, skipTask, snoozeTask } from '../../services/reminderActions';
-import type { SnoozeDurationMinutes, Task } from '../../types';
+import { ScreenScaffold } from '../../components/ScreenScaffold';
+import { useBrandPalette } from '../../hooks/useBrandPalette';
+import { openAlarmForTask } from '../../services/alarmService';
+import type { Task } from '../../types';
 
 type Props = NativeStackScreenProps<MainTabParamList, 'Dashboard'>;
+
+function isActionable(task: Task): boolean {
+  return task.status === 'pending' || task.status === 'snoozed';
+}
+
+/** Prefer the chosen display name; never greet with a raw email address. */
+function greetingName(profile: { displayName?: string; email?: string } | null): string {
+  const name = profile?.displayName?.trim();
+  if (name && !name.includes('@')) return name;
+  return 'there';
+}
 
 export function DashboardScreen({ navigation }: Props) {
   const tasks = useDataStore((s) => s.tasks);
   const bdi = useDataStore((s) => s.bdi);
   const upcomingReminder = useDataStore((s) => s.upcomingReminder);
   const goals = useDataStore((s) => s.goals);
+  const activeGoals = useMemo(
+    () => goals.filter((g) => g.status === 'active'),
+    [goals],
+  );
+  const habits = useDataStore((s) => s.habits);
   const profile = useAuthStore((s) => s.profile);
-  const [activeTask, setActiveTask] = useState<Task | null>(null);
-  const [reminderVisible, setReminderVisible] = useState(false);
+  const palette = useBrandPalette();
+  const [acting, setActing] = useState(false);
+
+  // Dashboard only shows tasks for habits that still exist and are active (or goal tasks).
+  const visibleTasks = useMemo(() => {
+    const activeHabitIds = new Set(
+      habits.filter((h) => h.status === 'active').map((h) => h.id),
+    );
+    return tasks.filter((t) => {
+      if (!t.habitId) return true;
+      return activeHabitIds.has(t.habitId);
+    });
+  }, [tasks, habits]);
+
+  const completedCount = useMemo(
+    () => visibleTasks.filter((t) => t.status === 'completed').length,
+    [visibleTasks],
+  );
+  const skippedCount = useMemo(
+    () => visibleTasks.filter((t) => t.status === 'skipped').length,
+    [visibleTasks],
+  );
+  const pendingCount = useMemo(
+    () => visibleTasks.filter((t) => isActionable(t)).length,
+    [visibleTasks],
+  );
 
   const todayProgress = useMemo(() => {
-    if (!tasks.length) return 0;
-    const done = tasks.filter((t) => t.status === 'completed').length;
-    return (done / tasks.length) * 100;
-  }, [tasks]);
+    if (!visibleTasks.length) return 0;
+    return (completedCount / visibleTasks.length) * 100;
+  }, [visibleTasks.length, completedCount]);
+
+  const weeklyGoals = useMemo(() => activeGoals.filter((g) => g.period === 'weekly'), [activeGoals]);
+  const monthlyGoals = useMemo(
+    () => activeGoals.filter((g) => g.period === 'monthly'),
+    [activeGoals],
+  );
 
   const weeklyProgress = useMemo(() => {
-    if (!goals.length) return 0;
-    const weekly = goals.filter((g) => g.period === 'weekly');
-    if (!weekly.length) return todayProgress;
+    if (!weeklyGoals.length) return 0;
     return (
-      weekly.reduce((acc, g) => acc + Math.min(100, (g.progress / g.target) * 100), 0) /
-      weekly.length
+      weeklyGoals.reduce((acc, g) => acc + Math.min(100, (g.progress / g.target) * 100), 0) /
+      weeklyGoals.length
     );
-  }, [goals, todayProgress]);
+  }, [weeklyGoals]);
 
   const monthlyProgress = useMemo(() => {
-    const monthly = goals.filter((g) => g.period === 'monthly');
-    if (!monthly.length) return weeklyProgress;
+    if (!monthlyGoals.length) return 0;
     return (
-      monthly.reduce((acc, g) => acc + Math.min(100, (g.progress / g.target) * 100), 0) /
-      monthly.length
+      monthlyGoals.reduce((acc, g) => acc + Math.min(100, (g.progress / g.target) * 100), 0) /
+      monthlyGoals.length
     );
-  }, [goals, weeklyProgress]);
+  }, [monthlyGoals]);
 
-  const reminderTask =
-    activeTask ??
-    (upcomingReminder ? tasks.find((t) => t.id === upcomingReminder.taskId) ?? null : null);
+  // Next reminder only when its task is still actionable — keeps Upcoming in sync with Act.
+  const upcomingTask = useMemo(() => {
+    if (!upcomingReminder) return null;
+    const task = visibleTasks.find((t) => t.id === upcomingReminder.taskId);
+    if (!task || !isActionable(task)) return null;
+    return task;
+  }, [upcomingReminder, visibleTasks]);
 
-  function openReminder(task: Task) {
-    setActiveTask(task);
-    setReminderVisible(true);
+  const activeHabits = useMemo(
+    () => habits.filter((h) => h.status === 'active').slice(0, 4),
+    [habits],
+  );
+
+  async function openAct(task: Task) {
+    if (!isActionable(task) || acting) return;
+    setActing(true);
+    try {
+      await openAlarmForTask(task.id, 'manual');
+    } finally {
+      setActing(false);
+    }
   }
 
   return (
-    <View style={styles.flex}>
+    <ScreenScaffold>
       <ScrollView contentContainerStyle={styles.container}>
-        <Text variant="headlineSmall">Hello, {profile?.displayName ?? 'there'}</Text>
+        <Text variant="headlineSmall">Hello, {greetingName(profile)}</Text>
         <Text variant="bodyMedium" style={styles.sub}>
           Today&apos;s discipline overview
         </Text>
@@ -69,31 +126,52 @@ export function DashboardScreen({ navigation }: Props) {
           <ProgressRing progress={todayProgress} label="Today" />
           <View style={styles.side}>
             <BdiCard
-              score={bdi?.score ?? profile?.bdiScore ?? 50}
+              score={bdi?.score ?? profile?.bdiScore ?? 0}
               weeklyChange={bdi?.weeklyChange ?? profile?.bdiWeeklyDelta ?? 0}
               monthlyChange={bdi?.monthlyChange ?? profile?.bdiMonthlyDelta ?? 0}
             />
+            <Button
+              mode="text"
+              textColor={palette.accentText}
+              compact
+              onPress={() => navigation.navigate('Reports')}
+              style={styles.reportLink}
+            >
+              View detailed report
+            </Button>
           </View>
         </View>
 
         <AppCard>
           <Text variant="titleMedium">Today&apos;s progress</Text>
           <Text variant="bodyLarge">{Math.round(todayProgress)}% tasks completed</Text>
-          <Text variant="bodyMedium">Weekly {Math.round(weeklyProgress)}%</Text>
-          <Text variant="bodyMedium">Monthly {Math.round(monthlyProgress)}%</Text>
+          <Text variant="bodyMedium">
+            {completedCount} done · {skippedCount} skipped · {pendingCount} left
+          </Text>
+          <Text variant="bodyMedium">Weekly goals {Math.round(weeklyProgress)}%</Text>
+          <Text variant="bodyMedium">Monthly goals {Math.round(monthlyProgress)}%</Text>
         </AppCard>
 
         <AppCard>
-          <Text variant="titleMedium">Upcoming reminder</Text>
-          {upcomingReminder ? (
+          <Text variant="titleMedium">Next reminder</Text>
+          {upcomingReminder && upcomingTask ? (
             <>
               <Text variant="bodyLarge">{upcomingReminder.title}</Text>
-              <Text variant="bodySmall">{new Date(upcomingReminder.scheduledAt).toLocaleString()}</Text>
-              {reminderTask ? (
-                <Button mode="contained-tonal" onPress={() => reminderTask && openReminder(reminderTask)}>
-                  Open reminder
-                </Button>
-              ) : null}
+              <Text variant="bodySmall">
+                {new Date(upcomingReminder.scheduledAt).toLocaleString()}
+              </Text>
+              <Button
+                mode="contained"
+                buttonColor={palette.accent}
+                textColor={palette.onAccent}
+                style={styles.cardAction}
+                contentStyle={styles.goalBtnContent}
+                labelStyle={styles.goalBtnLabel}
+                onPress={() => openAct(upcomingTask)}
+                disabled={acting}
+              >
+                Act
+              </Button>
             </>
           ) : (
             <Text variant="bodyMedium">No upcoming reminders</Text>
@@ -102,10 +180,12 @@ export function DashboardScreen({ navigation }: Props) {
 
         <AppCard>
           <Text variant="titleMedium">Today&apos;s tasks</Text>
-          {tasks.length === 0 ? (
-            <Text variant="bodyMedium">No tasks scheduled. Create a habit to generate daily tasks.</Text>
+          {visibleTasks.length === 0 ? (
+            <Text variant="bodyMedium">
+              No tasks scheduled. Create a habit to generate daily tasks.
+            </Text>
           ) : (
-            tasks.map((task) => (
+            visibleTasks.map((task) => (
               <View key={task.id} style={styles.taskRow}>
                 <View style={styles.taskMeta}>
                   <Text variant="bodyLarge">{task.title}</Text>
@@ -113,8 +193,8 @@ export function DashboardScreen({ navigation }: Props) {
                     {task.scheduledTime} · {task.status}
                   </Text>
                 </View>
-                {task.status === 'pending' || task.status === 'snoozed' ? (
-                  <Button compact onPress={() => openReminder(task)}>
+                {isActionable(task) ? (
+                  <Button compact onPress={() => openAct(task)} disabled={acting}>
                     Act
                   </Button>
                 ) : null}
@@ -125,51 +205,50 @@ export function DashboardScreen({ navigation }: Props) {
 
         <AppCard>
           <Text variant="titleMedium">Goal progress</Text>
-          {goals.slice(0, 4).map((goal) => (
-            <View key={goal.id} style={styles.taskRow}>
-              <Text variant="bodyMedium">{goal.title}</Text>
-              <Text variant="labelSmall">
-                {goal.progress}/{goal.target} ({goal.period})
+          {activeGoals.length === 0 ? (
+            <>
+              <Text variant="bodyMedium">
+                No goals yet. Goals are separate from habits — use them for longer targets (weekly /
+                monthly / yearly).
               </Text>
-            </View>
-          ))}
-          {!goals.length ? <Text variant="bodyMedium">No goals yet.</Text> : null}
+              {activeHabits.length ? (
+                <Text variant="bodySmall" style={styles.habitHint}>
+                  Active habits: {activeHabits.map((h) => h.title).join(', ')}
+                </Text>
+              ) : null}
+              <Button
+                mode="contained"
+                buttonColor={palette.accent}
+                textColor={palette.onAccent}
+                style={styles.cardAction}
+                contentStyle={styles.goalBtnContent}
+                labelStyle={styles.goalBtnLabel}
+                onPress={() => navigation.navigate('Goals')}
+              >
+                Create a goal
+              </Button>
+            </>
+          ) : (
+            activeGoals.slice(0, 4).map((goal) => (
+              <View key={goal.id} style={styles.taskRow}>
+                <Text variant="bodyMedium">{goal.title}</Text>
+                <Text variant="labelSmall">
+                  {goal.progress}/{goal.target} ({goal.period})
+                </Text>
+              </View>
+            ))
+          )}
         </AppCard>
       </ScrollView>
 
       <FAB
         icon="plus"
-        style={styles.fab}
-        onPress={() => navigation.navigate('Habits' as never)}
+        style={[styles.fab, { backgroundColor: palette.accent }]}
+        color={palette.onAccent}
+        onPress={() => navigation.navigate('Habits')}
         label="Add"
       />
-
-      {reminderTask ? (
-        <ReminderModal
-          task={reminderTask}
-          visible={reminderVisible}
-          onDismiss={() => {
-            setReminderVisible(false);
-            setActiveTask(null);
-          }}
-          onComplete={async () => {
-            await completeTask(reminderTask, reminderTask.status === 'snoozed');
-            setReminderVisible(false);
-            setActiveTask(null);
-          }}
-          onSkip={async () => {
-            await skipTask(reminderTask);
-            setReminderVisible(false);
-            setActiveTask(null);
-          }}
-          onSnooze={async (minutes: SnoozeDurationMinutes) => {
-            await snoozeTask(reminderTask, minutes);
-            setReminderVisible(false);
-            setActiveTask(null);
-          }}
-        />
-      ) : null}
-    </View>
+    </ScreenScaffold>
   );
 }
 
@@ -192,6 +271,10 @@ const styles = StyleSheet.create({
   side: {
     flex: 1,
   },
+  reportLink: {
+    alignSelf: 'flex-start',
+    marginTop: -4,
+  },
   taskRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
@@ -201,6 +284,23 @@ const styles = StyleSheet.create({
   taskMeta: {
     flex: 1,
     paddingRight: 8,
+  },
+  cardAction: {
+    marginTop: 12,
+    alignSelf: 'flex-start',
+    borderRadius: 14,
+  },
+  goalBtnContent: {
+    height: 44,
+    paddingHorizontal: 8,
+  },
+  goalBtnLabel: {
+    fontWeight: '700',
+    letterSpacing: 0.2,
+  },
+  habitHint: {
+    marginTop: 8,
+    opacity: 0.7,
   },
   fab: {
     position: 'absolute',

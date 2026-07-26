@@ -25,11 +25,14 @@ export type SnoozeDurationMinutes = 5 | 10 | 15 | 30 | 60;
 export type ThemeMode = 'system' | 'light' | 'dark';
 export type LanguageCode = 'en';
 
+export type ScheduleFrequency = 'once' | 'daily' | 'weekly' | 'monthly' | 'yearly';
+
 export interface RepeatRule {
-  frequency: GoalPeriod;
+  frequency: ScheduleFrequency;
   interval: number;
   daysOfWeek?: number[];
   dayOfMonth?: number;
+  startDate?: string;
   endDate?: string | null;
 }
 
@@ -38,6 +41,9 @@ export interface ReminderConfig {
   time: string;
   toneId: string;
   timezone: string;
+  /** Local file URI for a user-picked alarm sound (played by the in-app alarm UI). */
+  customToneUri?: string | null;
+  customToneName?: string | null;
 }
 
 export interface UserProfile {
@@ -127,6 +133,10 @@ export interface Reminder {
   description: string;
   scheduledAt: string;
   toneId: string;
+  customToneUri?: string | null;
+  customToneName?: string | null;
+  /** Expo notification id scheduled on this device. */
+  notificationId?: string | null;
   status: 'scheduled' | 'delivered' | 'acted';
   createdAt: string;
   updatedAt: string;

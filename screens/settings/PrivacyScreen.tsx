@@ -2,9 +2,11 @@ import React from 'react';
 import { ScrollView, StyleSheet } from 'react-native';
 import { Text } from 'react-native-paper';
 import { AppCard } from '../../components/AppCard';
+import { ScreenScaffold } from '../../components/ScreenScaffold';
 
 export function PrivacyScreen() {
   return (
+    <ScreenScaffold>
     <ScrollView contentContainerStyle={styles.container}>
       <AppCard>
         <Text variant="titleMedium">Privacy</Text>
@@ -15,6 +17,7 @@ export function PrivacyScreen() {
         </Text>
       </AppCard>
     </ScrollView>
+    </ScreenScaffold>
   );
 }
 

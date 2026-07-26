@@ -28,10 +28,11 @@ export const SNOOZE_OPTIONS: { label: string; minutes: 5 | 10 | 15 | 30 | 60 }[]
 export const MILESTONE_DAYS = [30, 50, 100, 175, 200, 365] as const;
 
 export const REMINDER_TONES = [
-  { id: 'default', label: 'Default' },
+  { id: 'default', label: 'Default alarm' },
   { id: 'gentle', label: 'Gentle' },
   { id: 'focus', label: 'Focus' },
   { id: 'urgent', label: 'Urgent' },
+  { id: 'custom', label: 'My music' },
 ];
 
 export const PRIORITY_OPTIONS = [

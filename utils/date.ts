@@ -16,17 +16,34 @@ export function minutesBetween(isoA: string, isoB: string): number {
 }
 
 export function todayDateKey(date = new Date()): string {
-  return date.toISOString().slice(0, 10);
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(
+    date.getDate(),
+  ).padStart(2, '0')}`;
+}
+
+/**
+ * Build a Date from a local calendar day + HH:mm.
+ * Never append "Z" — that would treat the wall-clock time as UTC.
+ */
+export function localDateTimeFromKey(dateKey: string, timeHHmm: string): Date {
+  const [y, m, d] = dateKey.split('-').map(Number);
+  const [hh, mm] = timeHHmm.split(':').map(Number);
+  return new Date(y ?? 1970, (m ?? 1) - 1, d ?? 1, hh ?? 0, mm ?? 0, 0, 0);
+}
+
+/** ISO string for a local date+time (includes the device offset, not a forced Z). */
+export function localDateTimeIso(dateKey: string, timeHHmm: string): string {
+  return localDateTimeFromKey(dateKey, timeHHmm).toISOString();
 }
 
 export function startOfWeek(date = new Date()): string {
-  const d = new Date(date);
-  const day = d.getUTCDay();
-  const diff = d.getUTCDate() - day + (day === 0 ? -6 : 1);
-  d.setUTCDate(diff);
-  return d.toISOString().slice(0, 10);
+  const d = new Date(date.getFullYear(), date.getMonth(), date.getDate());
+  const day = d.getDay();
+  const diff = day === 0 ? -6 : 1 - day;
+  d.setDate(d.getDate() + diff);
+  return todayDateKey(d);
 }
 
 export function startOfMonth(date = new Date()): string {
-  return `${date.getUTCFullYear()}-${String(date.getUTCMonth() + 1).padStart(2, '0')}-01`;
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-01`;
 }

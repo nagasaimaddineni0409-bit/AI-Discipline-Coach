@@ -6,6 +6,7 @@ import {
   GoogleAuthProvider,
   OAuthProvider,
   signInWithCredential,
+  signInWithPopup,
   User,
   sendPasswordResetEmail,
   deleteUser,
@@ -13,9 +14,11 @@ import {
 import * as Google from 'expo-auth-session/providers/google';
 import * as AppleAuthentication from 'expo-apple-authentication';
 import * as WebBrowser from 'expo-web-browser';
+import * as AuthSession from 'expo-auth-session';
 import { Platform } from 'react-native';
 import { getFirebaseAuth } from './config';
 
+// Completes the auth popup on native / Expo Go. On web we use Firebase popup instead.
 WebBrowser.maybeCompleteAuthSession();
 
 export async function registerWithEmail(
@@ -50,11 +53,45 @@ export async function deleteAuthUser(): Promise<void> {
   }
 }
 
+export function isGoogleAuthConfigured(): boolean {
+  // Web uses Firebase Auth popup (needs Google enabled in Firebase Console).
+  // Native needs the Web client ID for expo-auth-session → Firebase credential.
+  if (Platform.OS === 'web') return isFirebaseAuthReady();
+  return Boolean(process.env.EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID?.trim());
+}
+
+function isFirebaseAuthReady(): boolean {
+  return Boolean(process.env.EXPO_PUBLIC_FIREBASE_API_KEY?.trim());
+}
+
+/**
+ * Web Google Sign-In via Firebase popup.
+ * Avoids expo-auth-session redirects that replace the tab with a blank "undefined" page.
+ */
+export async function signInWithGoogleWeb(): Promise<User> {
+  const provider = new GoogleAuthProvider();
+  provider.setCustomParameters({ prompt: 'select_account' });
+  provider.addScope('profile');
+  provider.addScope('email');
+  const result = await signInWithPopup(getFirebaseAuth(), provider);
+  return result.user;
+}
+
 export function useGoogleAuthRequest() {
+  const webClientId = process.env.EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID?.trim() || undefined;
+  const redirectUri = AuthSession.makeRedirectUri({
+    scheme: 'discipline-ai',
+    path: 'redirect',
+  });
+
   return Google.useAuthRequest({
-    webClientId: process.env.EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID,
-    iosClientId: process.env.EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID,
-    androidClientId: process.env.EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID,
+    webClientId,
+    iosClientId: process.env.EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID?.trim() || undefined,
+    androidClientId: process.env.EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID?.trim() || undefined,
+    clientId: webClientId,
+    redirectUri,
+    scopes: ['openid', 'profile', 'email'],
+    responseType: AuthSession.ResponseType.IdToken,
   });
 }
 
@@ -65,7 +102,7 @@ export async function signInWithGoogleIdToken(idToken: string): Promise<User> {
 }
 
 export async function signInWithApple(): Promise<User | null> {
-  if (Platform.OS !== 'ios' && Platform.OS !== 'web') {
+  if (Platform.OS !== 'ios') {
     return null;
   }
   try {

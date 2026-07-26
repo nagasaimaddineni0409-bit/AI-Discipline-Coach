@@ -59,19 +59,24 @@ export class GoalRepository extends FirestoreRepository {
   }
 }
 
+function byScheduledTime(a: Task, b: Task) {
+  return a.scheduledTime.localeCompare(b.scheduledTime);
+}
+
 export class TaskRepository extends FirestoreRepository {
+  // Sort client-side so we don't require a composite (scheduledDate + scheduledTime) index.
   listForDate(uid: string, dateKey: string) {
-    return this.list<Task>(tasksPath(uid), [
-      where('scheduledDate', '==', dateKey),
-      orderBy('scheduledTime', 'asc'),
-    ]);
+    return this.list<Task>(tasksPath(uid), [where('scheduledDate', '==', dateKey)]).then((tasks) =>
+      tasks.sort(byScheduledTime),
+    );
   }
 
   subscribeToday(uid: string, dateKey: string, cb: (tasks: Task[]) => void) {
     return this.subscribe<Task>(
       tasksPath(uid),
-      [where('scheduledDate', '==', dateKey), orderBy('scheduledTime', 'asc')],
-      cb,
+      [where('scheduledDate', '==', dateKey)],
+      (tasks) => cb(tasks.sort(byScheduledTime)),
+      (err) => console.warn('[tasks] subscription error:', err.message),
     );
   }
 
@@ -85,16 +90,26 @@ export class TaskRepository extends FirestoreRepository {
       updatedAt: new Date().toISOString(),
     });
   }
+
+  removeByUser(uid: string, taskId: string) {
+    return this.remove(tasksPath(uid), taskId);
+  }
 }
 
 export class ReminderRepository extends FirestoreRepository {
+  // Single-field range filter (auto-indexed); sort/slice client-side to avoid a composite index.
   listUpcoming(uid: string, limitCount = 5) {
     const now = new Date().toISOString();
-    return this.list<Reminder>(remindersPath(uid), [
-      where('scheduledAt', '>=', now),
-      orderBy('scheduledAt', 'asc'),
-      orderBy('createdAt', 'desc'),
-    ]).then((items) => items.slice(0, limitCount));
+    return this.list<Reminder>(remindersPath(uid), [where('scheduledAt', '>=', now)]).then((items) =>
+      items
+        .filter((r) => r.status === 'scheduled')
+        .sort((a, b) => a.scheduledAt.localeCompare(b.scheduledAt))
+        .slice(0, limitCount),
+    );
+  }
+
+  listForTask(uid: string, taskId: string) {
+    return this.list<Reminder>(remindersPath(uid), [where('taskId', '==', taskId)]);
   }
 
   upsert(uid: string, reminder: Reminder) {

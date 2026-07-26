@@ -1,4 +1,5 @@
 import * as admin from 'firebase-admin';
+import * as functionsV1 from 'firebase-functions/v1';
 import { onSchedule } from 'firebase-functions/v2/scheduler';
 import { onDocumentCreated } from 'firebase-functions/v2/firestore';
 import { onCall, HttpsError } from 'firebase-functions/v2/https';
@@ -6,6 +7,29 @@ import { logger } from 'firebase-functions';
 
 admin.initializeApp();
 const db = admin.firestore();
+
+/**
+ * Purge every trace of a user when their auth account is deleted.
+ *
+ * `recursiveDelete` clears users/{uid} and all of its subcollections
+ * (habits, goals, tasks, reminders, behaviour_events, *_reports, notifications).
+ * The settings and premium docs are keyed by uid at the top level, so they
+ * are removed separately.
+ */
+export const purgeUserData = functionsV1.auth.user().onDelete(async (user) => {
+  const uid = user.uid;
+  try {
+    await db.recursiveDelete(db.collection('users').doc(uid));
+    await Promise.all([
+      db.collection('settings').doc(uid).delete(),
+      db.collection('premium').doc(uid).delete(),
+    ]);
+    logger.info('Purged data for deleted user', { uid });
+  } catch (err) {
+    logger.error('Failed to purge user data', { uid, err });
+    throw err;
+  }
+});
 
 interface BehaviourEventDoc {
   action: string;

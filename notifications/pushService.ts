@@ -3,6 +3,7 @@ import * as Device from 'expo-device';
 import { Platform } from 'react-native';
 import { COLLECTIONS } from '../firebase/config';
 import { FirestoreRepository } from '../database/baseRepository';
+import { ensureAlarmChannel } from '../services/alarmScheduler';
 
 Notifications.setNotificationHandler({
   handleNotification: async () => ({
@@ -26,7 +27,7 @@ class PushRepository extends FirestoreRepository {
 const pushRepository = new PushRepository();
 
 export async function registerForPushNotifications(userId: string): Promise<string | null> {
-  if (!Device.isDevice) return null;
+  if (!Device.isDevice && Platform.OS !== 'web') return null;
 
   const { status: existing } = await Notifications.getPermissionsAsync();
   let finalStatus = existing;
@@ -36,50 +37,18 @@ export async function registerForPushNotifications(userId: string): Promise<stri
   }
   if (finalStatus !== 'granted') return null;
 
-  const token = (
-    await Notifications.getExpoPushTokenAsync({
-      projectId: process.env.EXPO_PUBLIC_FIREBASE_PROJECT_ID,
-    })
-  ).data;
+  await ensureAlarmChannel();
 
-  if (Platform.OS === 'android') {
-    await Notifications.setNotificationChannelAsync('reminders', {
-      name: 'Reminders',
-      importance: Notifications.AndroidImportance.HIGH,
-    });
+  try {
+    const token = (
+      await Notifications.getExpoPushTokenAsync({
+        projectId: process.env.EXPO_PUBLIC_FIREBASE_PROJECT_ID,
+      })
+    ).data;
+    await pushRepository.saveToken(userId, token);
+    return token;
+  } catch {
+    // Local alarms still work without a push token (Expo Go / misconfigured projectId).
+    return null;
   }
-
-  await pushRepository.saveToken(userId, token);
-  return token;
-}
-
-export function listenForNotificationResponses(
-  onReminderOpen: (taskId?: string) => void,
-): () => void {
-  const sub = Notifications.addNotificationResponseReceivedListener((response) => {
-    const taskId = response.notification.request.content.data?.taskId as string | undefined;
-    onReminderOpen(taskId);
-  });
-  return () => sub.remove();
-}
-
-export async function scheduleLocalReminder(input: {
-  title: string;
-  body: string;
-  scheduledAt: Date;
-  taskId: string;
-  toneId: string;
-}) {
-  await Notifications.scheduleNotificationAsync({
-    content: {
-      title: input.title,
-      body: input.body,
-      data: { taskId: input.taskId, toneId: input.toneId },
-      sound: input.toneId === 'gentle' ? 'default' : true,
-    },
-    trigger: {
-      type: Notifications.SchedulableTriggerInputTypes.DATE,
-      date: input.scheduledAt,
-    },
-  });
 }
