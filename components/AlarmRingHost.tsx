@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { StyleSheet, View, Vibration, Platform } from 'react-native';
-import { Audio, InterruptionModeAndroid, InterruptionModeIOS } from 'expo-av';
+import { createAudioPlayer, setAudioModeAsync, type AudioPlayer } from 'expo-audio';
 import { Button, Text } from 'react-native-paper';
 import { LinearGradient } from 'expo-linear-gradient';
 import { SNOOZE_OPTIONS } from '../constants/categories';
@@ -17,7 +17,7 @@ export function AlarmRingHost() {
   const active = useAlarmStore((s) => s.active);
   const clearAlarm = useAlarmStore((s) => s.clearAlarm);
   const palette = useBrandPalette();
-  const soundRef = useRef<Audio.Sound | null>(null);
+  const playerRef = useRef<AudioPlayer | null>(null);
   const [snoozeOpen, setSnoozeOpen] = useState(false);
   const [acting, setActing] = useState(false);
 
@@ -28,27 +28,24 @@ export function AlarmRingHost() {
 
     async function startRinging() {
       try {
-        await Audio.setAudioModeAsync({
-          allowsRecordingIOS: false,
-          playsInSilentModeIOS: true,
-          staysActiveInBackground: true,
-          interruptionModeIOS: InterruptionModeIOS.DoNotMix,
-          interruptionModeAndroid: InterruptionModeAndroid.DoNotMix,
-          shouldDuckAndroid: false,
-          playThroughEarpieceAndroid: false,
+        await setAudioModeAsync({
+          playsInSilentMode: true,
+          shouldPlayInBackground: true,
+          interruptionMode: 'doNotMix',
+          shouldRouteThroughEarpiece: false,
         });
 
         const uri = active?.reminder.customToneUri;
         if (uri) {
-          const { sound } = await Audio.Sound.createAsync(
-            { uri },
-            { shouldPlay: true, isLooping: true, volume: 1 },
-          );
+          const player = createAudioPlayer({ uri });
           if (cancelled) {
-            await sound.unloadAsync();
+            player.remove();
             return;
           }
-          soundRef.current = sound;
+          player.loop = true;
+          player.volume = 1;
+          player.play();
+          playerRef.current = player;
         }
       } catch {
         // Fall through to vibration if the custom file can't play.
@@ -68,22 +65,27 @@ export function AlarmRingHost() {
     return () => {
       cancelled = true;
       Vibration.cancel();
-      const sound = soundRef.current;
-      soundRef.current = null;
-      if (sound) {
-        void sound.stopAsync().finally(() => void sound.unloadAsync());
+      const player = playerRef.current;
+      playerRef.current = null;
+      if (player) {
+        try {
+          player.pause();
+          player.remove();
+        } catch {
+          // ignore
+        }
       }
     };
   }, [active]);
 
-  async function stopRinging() {
+  function stopRinging() {
     Vibration.cancel();
-    const sound = soundRef.current;
-    soundRef.current = null;
-    if (sound) {
+    const player = playerRef.current;
+    playerRef.current = null;
+    if (player) {
       try {
-        await sound.stopAsync();
-        await sound.unloadAsync();
+        player.pause();
+        player.remove();
       } catch {
         // ignore
       }

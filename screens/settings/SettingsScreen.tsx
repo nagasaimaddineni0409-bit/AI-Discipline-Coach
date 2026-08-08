@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { Pressable, ScrollView, StyleSheet, View } from 'react-native';
+import { Pressable, Platform, ScrollView, StyleSheet, View } from 'react-native';
 import {
   Button,
   Dialog,
@@ -20,6 +20,10 @@ import { ScreenScaffold } from '../../components/ScreenScaffold';
 import { AppCard } from '../../components/AppCard';
 import { useBrandPalette } from '../../hooks/useBrandPalette';
 import { formatAuthError } from '../../utils/errors';
+import {
+  ensureAlarmPermissions,
+  openExactAlarmSettings,
+} from '../../services/alarmPermissions';
 import type { ThemeMode } from '../../types';
 import { RootStackParamList } from '../../navigation/types';
 
@@ -153,6 +157,24 @@ export function SettingsScreen({ navigation }: Props) {
               if (user) void patch(user.uid, { reminderSoundsEnabled });
             }}
           />
+          <View style={[styles.divider, { backgroundColor: palette.divider }]} />
+          <SettingRow
+            title="Allow notifications"
+            subtitle="Required for reminders to appear"
+            icon="bell-ring-outline"
+            onPress={() => void ensureAlarmPermissions()}
+          />
+          {Platform.OS === 'android' ? (
+            <>
+              <View style={[styles.divider, { backgroundColor: palette.divider }]} />
+              <SettingRow
+                title="Alarms & reminders"
+                subtitle="Exact timed alarms when the app is closed"
+                icon="alarm"
+                onPress={() => void openExactAlarmSettings()}
+              />
+            </>
+          ) : null}
         </AppCard>
 
         <AppCard>

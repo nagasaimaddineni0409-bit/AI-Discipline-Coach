@@ -12,18 +12,24 @@ export function useAuthBootstrap() {
     const unsub = onAuthStateChanged(auth, async (user) => {
       setLoading(true);
       setUser(user);
-      if (user) {
-        const profile = await userRepository.ensureProfile(
-          user.uid,
-          user.email ?? '',
-          user.displayName ?? '',
-        );
-        setProfile(profile);
-      } else {
+      try {
+        if (user) {
+          const profile = await userRepository.ensureProfile(
+            user.uid,
+            user.email ?? '',
+            user.displayName ?? '',
+          );
+          setProfile(profile);
+        } else {
+          setProfile(null);
+        }
+      } catch {
+        // Profile load failed (offline / rules). Still unlock the UI so login can proceed.
         setProfile(null);
+      } finally {
+        setLoading(false);
+        setInitialized(true);
       }
-      setLoading(false);
-      setInitialized(true);
     });
     return unsub;
   }, [setUser, setProfile, setInitialized, setLoading]);
