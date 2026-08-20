@@ -9,6 +9,7 @@ const defaultSettings = (userId: string): UserSettings => ({
   language: 'en',
   notificationsEnabled: true,
   reminderSoundsEnabled: true,
+  weeklyEmailEnabled: true,
   defaultReminderToneId: 'default',
   updatedAt: new Date().toISOString(),
 });

@@ -1,5 +1,5 @@
 import React, { useMemo, useState } from 'react';
-import { ScrollView, StyleSheet, View } from 'react-native';
+import { Pressable, ScrollView, StyleSheet, View } from 'react-native';
 import { Button, Text, FAB } from 'react-native-paper';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { AppCard } from '../../components/AppCard';
@@ -11,9 +11,12 @@ import { MainTabParamList } from '../../navigation/types';
 import { ScreenScaffold } from '../../components/ScreenScaffold';
 import { useBrandPalette } from '../../hooks/useBrandPalette';
 import { openAlarmForTask } from '../../services/alarmService';
+import { localDateTimeFromKey } from '../../utils/date';
 import type { Task } from '../../types';
 
 type Props = NativeStackScreenProps<MainTabParamList, 'Dashboard'>;
+
+const ACT_GRACE_MS = 30_000;
 
 function isActionable(task: Task): boolean {
   return task.status === 'pending' || task.status === 'snoozed';
@@ -91,13 +94,38 @@ export function DashboardScreen({ navigation }: Props) {
     );
   }, [monthlyGoals]);
 
-  // Next reminder only when its task is still actionable — keeps Upcoming in sync with Act.
+  // Prefer a due/overdue task (the one that just rang) over the next future reminder.
   const upcomingTask = useMemo(() => {
+    const now = Date.now() + ACT_GRACE_MS;
+    const dueLocal = visibleTasks
+      .filter(isActionable)
+      .map((t) => {
+        const dueAt =
+          t.status === 'snoozed' && t.snoozedUntil
+            ? new Date(t.snoozedUntil).getTime()
+            : localDateTimeFromKey(t.scheduledDate, t.scheduledTime).getTime();
+        return { t, dueAt };
+      })
+      .filter((row) => row.dueAt <= now)
+      .sort((a, b) => a.dueAt - b.dueAt)[0]?.t;
+    if (dueLocal) return dueLocal;
+
     if (!upcomingReminder) return null;
     const task = visibleTasks.find((t) => t.id === upcomingReminder.taskId);
     if (!task || !isActionable(task)) return null;
     return task;
   }, [upcomingReminder, visibleTasks]);
+
+  const reminderDue = useMemo(() => {
+    if (!upcomingTask) return false;
+    const dueAt =
+      upcomingTask.status === 'snoozed' && upcomingTask.snoozedUntil
+        ? new Date(upcomingTask.snoozedUntil).getTime()
+        : upcomingReminder?.taskId === upcomingTask.id
+          ? new Date(upcomingReminder.scheduledAt).getTime()
+          : localDateTimeFromKey(upcomingTask.scheduledDate, upcomingTask.scheduledTime).getTime();
+    return dueAt <= Date.now() + ACT_GRACE_MS;
+  }, [upcomingTask, upcomingReminder]);
 
   const activeHabits = useMemo(
     () => habits.filter((h) => h.status === 'active').slice(0, 4),
@@ -105,13 +133,19 @@ export function DashboardScreen({ navigation }: Props) {
   );
 
   async function openAct(task: Task) {
-    if (!isActionable(task) || acting) return;
+    if (!isActionable(task) || acting || !reminderDue) return;
     setActing(true);
     try {
       await openAlarmForTask(task.id, 'manual');
     } finally {
       setActing(false);
     }
+  }
+
+  function openEditHabit() {
+    const habitId = upcomingTask?.habitId;
+    if (!habitId) return;
+    navigation.navigate('Habits', { editHabitId: habitId });
   }
 
   return (
@@ -154,12 +188,24 @@ export function DashboardScreen({ navigation }: Props) {
 
         <AppCard>
           <Text variant="titleMedium">Next reminder</Text>
-          {upcomingReminder && upcomingTask ? (
+          {upcomingTask ? (
             <>
-              <Text variant="bodyLarge">{upcomingReminder.title}</Text>
-              <Text variant="bodySmall">
-                {new Date(upcomingReminder.scheduledAt).toLocaleString()}
-              </Text>
+              <Pressable onPress={openEditHabit} disabled={!upcomingTask.habitId}>
+                <Text variant="bodyLarge">{upcomingTask.title}</Text>
+                <Text variant="bodySmall">
+                  {upcomingReminder?.taskId === upcomingTask.id
+                    ? new Date(upcomingReminder.scheduledAt).toLocaleString()
+                    : localDateTimeFromKey(
+                        upcomingTask.scheduledDate,
+                        upcomingTask.scheduledTime,
+                      ).toLocaleString()}
+                </Text>
+                {upcomingTask.habitId ? (
+                  <Text variant="labelSmall" style={styles.tapHint}>
+                    Tap to edit habit
+                  </Text>
+                ) : null}
+              </Pressable>
               <Button
                 mode="contained"
                 buttonColor={palette.accent}
@@ -168,38 +214,13 @@ export function DashboardScreen({ navigation }: Props) {
                 contentStyle={styles.goalBtnContent}
                 labelStyle={styles.goalBtnLabel}
                 onPress={() => openAct(upcomingTask)}
-                disabled={acting}
+                disabled={acting || !reminderDue}
               >
-                Act
+                {reminderDue ? 'Act' : 'Not due yet'}
               </Button>
             </>
           ) : (
             <Text variant="bodyMedium">No upcoming reminders</Text>
-          )}
-        </AppCard>
-
-        <AppCard>
-          <Text variant="titleMedium">Today&apos;s tasks</Text>
-          {visibleTasks.length === 0 ? (
-            <Text variant="bodyMedium">
-              No tasks scheduled. Create a habit to generate daily tasks.
-            </Text>
-          ) : (
-            visibleTasks.map((task) => (
-              <View key={task.id} style={styles.taskRow}>
-                <View style={styles.taskMeta}>
-                  <Text variant="bodyLarge">{task.title}</Text>
-                  <Text variant="labelSmall">
-                    {task.scheduledTime} · {task.status}
-                  </Text>
-                </View>
-                {isActionable(task) ? (
-                  <Button compact onPress={() => openAct(task)} disabled={acting}>
-                    Act
-                  </Button>
-                ) : null}
-              </View>
-            ))
           )}
         </AppCard>
 
@@ -281,10 +302,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     paddingVertical: 8,
   },
-  taskMeta: {
-    flex: 1,
-    paddingRight: 8,
-  },
   cardAction: {
     marginTop: 12,
     alignSelf: 'flex-start',
@@ -301,6 +318,10 @@ const styles = StyleSheet.create({
   habitHint: {
     marginTop: 8,
     opacity: 0.7,
+  },
+  tapHint: {
+    marginTop: 4,
+    opacity: 0.6,
   },
   fab: {
     position: 'absolute',

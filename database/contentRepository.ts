@@ -97,19 +97,20 @@ export class TaskRepository extends FirestoreRepository {
 }
 
 export class ReminderRepository extends FirestoreRepository {
-  // Single-field range filter (auto-indexed); sort/slice client-side to avoid a composite index.
+  // Include overdue scheduled reminders (status filter only — past due must still surface).
   listUpcoming(uid: string, limitCount = 5) {
-    const now = new Date().toISOString();
-    return this.list<Reminder>(remindersPath(uid), [where('scheduledAt', '>=', now)]).then((items) =>
-      items
-        .filter((r) => r.status === 'scheduled')
-        .sort((a, b) => a.scheduledAt.localeCompare(b.scheduledAt))
-        .slice(0, limitCount),
-    );
+    return this.listScheduled(uid).then((items) => items.slice(0, limitCount));
   }
 
   listForTask(uid: string, taskId: string) {
     return this.list<Reminder>(remindersPath(uid), [where('taskId', '==', taskId)]);
+  }
+
+  /** All reminders still waiting to fire (any scheduledAt). Sorted ascending. */
+  listScheduled(uid: string) {
+    return this.list<Reminder>(remindersPath(uid), [where('status', '==', 'scheduled')]).then(
+      (items) => items.sort((a, b) => a.scheduledAt.localeCompare(b.scheduledAt)),
+    );
   }
 
   upsert(uid: string, reminder: Reminder) {

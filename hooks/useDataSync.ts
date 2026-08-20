@@ -1,4 +1,5 @@
 import { useEffect } from 'react';
+import { AppState, type AppStateStatus } from 'react-native';
 import NetInfo from '@react-native-community/netinfo';
 import { useDataStore } from '../features/data/dataStore';
 import {
@@ -18,6 +19,8 @@ import { cacheGet, cacheSet } from '../services/cacheService';
 import { ensureDailyTasksForHabits } from '../services/dailyTaskScheduler';
 import { reconcileTasksWithHabits } from '../services/habitLifecycle';
 import { refreshUpcomingReminder } from '../services/reminderActions';
+import { ensureAllPendingAlarmsScheduled } from '../services/alarmScheduler';
+import { flushAlarmsAfterDataReady } from '../services/alarmService';
 import type { Habit, Goal, Task } from '../types';
 
 export function useDataSync() {
@@ -49,6 +52,15 @@ export function useDataSync() {
         setHabits(cached.habits);
         setGoals(cached.goals);
         setTasks(cached.tasks);
+        await flushAlarmsAfterDataReady(uid);
+      }
+    }
+
+    async function rescheduleAlarms() {
+      try {
+        await ensureAllPendingAlarmsScheduled(uid);
+      } catch {
+        // Best-effort — scheduling failures surface via permission tips.
       }
     }
 
@@ -63,14 +75,21 @@ export function useDataSync() {
       await reconcileTasksWithHabits(uid, habits, existing);
       const remaining = await taskRepository.listForDate(uid, today);
       await ensureDailyTasksForHabits(uid, habits, remaining);
-      if (!cancelled) await refreshUpcomingReminder(uid);
+      if (!cancelled) {
+        await refreshUpcomingReminder(uid);
+        await rescheduleAlarms();
+        await flushAlarmsAfterDataReady(uid);
+      }
     });
     const unsubGoals = goalRepository.subscribeByUser(uid, (goals) => {
       setGoals(goals);
     });
     const unsubTasks = taskRepository.subscribeToday(uid, dateKey, async (tasks) => {
       setTasks(tasks);
-      if (!cancelled) await refreshUpcomingReminder(uid);
+      if (!cancelled) {
+        await refreshUpcomingReminder(uid);
+        await flushAlarmsAfterDataReady(uid);
+      }
     });
 
     (async () => {
@@ -79,6 +98,8 @@ export function useDataSync() {
         if (cancelled) return;
         setBehaviourEvents(events);
         await refreshUpcomingReminder(uid);
+        await rescheduleAlarms();
+        await flushAlarmsAfterDataReady(uid);
 
         const weeklyFlags = buildDailyCompletionFlags(events, 7);
         const monthlyFlags = buildDailyCompletionFlags(events, 30);
@@ -106,12 +127,22 @@ export function useDataSync() {
       if (state.isConnected) setSyncing(false);
     });
 
+    // Re-verify OS schedules when returning from background (OEMs may have dropped them).
+    const onAppState = (next: AppStateStatus) => {
+      if (next === 'active' && !cancelled) {
+        void rescheduleAlarms();
+        void flushAlarmsAfterDataReady(uid);
+      }
+    };
+    const appStateSub = AppState.addEventListener('change', onAppState);
+
     return () => {
       cancelled = true;
       unsubHabits();
       unsubGoals();
       unsubTasks();
       netUnsub();
+      appStateSub.remove();
     };
   }, [
     user,

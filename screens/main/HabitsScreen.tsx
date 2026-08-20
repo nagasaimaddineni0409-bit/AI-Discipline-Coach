@@ -1,22 +1,22 @@
-import React, { useState } from 'react';
-import { FlatList, StyleSheet, View } from 'react-native';
+import React, { useEffect, useMemo, useState } from 'react';
+import { FlatList, StyleSheet } from 'react-native';
 import { Button, Dialog, FAB, Portal, Text } from 'react-native-paper';
 import { useAuthStore } from '../../features/auth/authStore';
 import { useDataStore } from '../../features/data/dataStore';
 import { EntityForm, EntityFormValues } from '../../components/EntityForm';
 import { habitFormSchemaFor } from '../../utils/validation';
-import { buildHabitPayload, createReminderFromTask, createTaskFromHabit } from '../../services/taskFactory';
-import { habitRepository, taskRepository } from '../../database/contentRepository';
+import { buildHabitPayload } from '../../services/taskFactory';
+import { habitRepository } from '../../database/contentRepository';
 import { EntityCard } from '../../components/EntityCard';
-import { todayDateKey } from '../../utils/date';
-import { describeSchedule, matchesSchedule } from '../../utils/schedule';
+import { parseTimeToMinutes, todayDateKey } from '../../utils/date';
+import { describeSchedule } from '../../utils/schedule';
 import { habitToFormValues } from '../../utils/formValues';
 import { syncTodayTaskForHabit } from '../../services/dailyTaskScheduler';
 import { deleteHabitCascade, setHabitStatusCascade } from '../../services/habitLifecycle';
-import { upsertReminderWithAlarm } from '../../services/alarmScheduler';
-import { openAlarmForTask } from '../../services/alarmService';
 import { ScreenScaffold } from '../../components/ScreenScaffold';
 import type { GoalStatus, Habit } from '../../types';
+import { RouteProp, useRoute, useNavigation } from '@react-navigation/native';
+import type { MainTabParamList } from '../../navigation/types';
 
 const defaultValues: EntityFormValues = {
   title: '',
@@ -40,6 +40,8 @@ const defaultValues: EntityFormValues = {
 };
 
 export function HabitsScreen() {
+  const route = useRoute<RouteProp<MainTabParamList, 'Habits'>>();
+  const navigation = useNavigation();
   const user = useAuthStore((s) => s.user);
   const habits = useDataStore((s) => s.habits);
   const tasks = useDataStore((s) => s.tasks);
@@ -49,6 +51,30 @@ export function HabitsScreen() {
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(false);
   const [pendingDelete, setPendingDelete] = useState<Habit | null>(null);
+
+  const sortedHabits = useMemo(
+    () =>
+      [...habits].sort(
+        (a, b) => parseTimeToMinutes(a.reminder.time) - parseTimeToMinutes(b.reminder.time),
+      ),
+    [habits],
+  );
+
+  function startEdit(habit: Habit) {
+    setEditing(habit);
+    setValues(habitToFormValues(habit));
+    setErrors({});
+    setCreating(true);
+  }
+
+  // Open edit when Dashboard navigates here with editHabitId.
+  useEffect(() => {
+    const editHabitId = route.params?.editHabitId;
+    if (!editHabitId) return;
+    const habit = habits.find((h) => h.id === editHabitId);
+    if (habit) startEdit(habit);
+    navigation.setParams({ editHabitId: undefined } as never);
+  }, [route.params?.editHabitId, habits, navigation]);
 
   async function setHabitStatus(habit: Habit, status: GoalStatus) {
     if (!user) return;
@@ -63,13 +89,6 @@ export function HabitsScreen() {
   function startCreate() {
     setEditing(null);
     setValues(defaultValues);
-    setErrors({});
-    setCreating(true);
-  }
-
-  function startEdit(habit: Habit) {
-    setEditing(habit);
-    setValues(habitToFormValues(habit));
     setErrors({});
     setCreating(true);
   }
@@ -122,25 +141,9 @@ export function HabitsScreen() {
         },
       }, editing ?? undefined);
       await habitRepository.upsert(user.uid, habit);
-      if (editing) {
-        // Reconcile today's task with the edited schedule.
-        await syncTodayTaskForHabit(user.uid, habit, tasks);
-      } else {
-        // Generate today's task/reminder only if the schedule includes today.
-        const dateKey = todayDateKey();
-        if (habit.reminder.enabled && matchesSchedule(habit.repeatRule, dateKey)) {
-          const task = createTaskFromHabit(habit, dateKey);
-          await taskRepository.upsert(user.uid, task);
-          const reminder = createReminderFromTask(task, habit.reminder.toneId, {
-            customToneUri: habit.reminder.customToneUri,
-            customToneName: habit.reminder.customToneName,
-          });
-          const saved = await upsertReminderWithAlarm(user.uid, reminder);
-          if (!saved.notificationId && new Date(saved.scheduledAt).getTime() <= Date.now()) {
-            await openAlarmForTask(task.id, 'overdue', saved);
-          }
-        }
-      }
+      // One path only: sync creates/updates today's task. Do not also create here —
+      // the habit subscription runs ensureDailyTasksForHabits and that race caused duplicates.
+      await syncTodayTaskForHabit(user.uid, habit, tasks);
       closeForm();
     } finally {
       setLoading(false);
@@ -168,7 +171,7 @@ export function HabitsScreen() {
     <ScreenScaffold>
       <FlatList
         contentContainerStyle={styles.list}
-        data={habits}
+        data={sortedHabits}
         keyExtractor={(item) => item.id}
         ListEmptyComponent={<Text style={styles.empty}>No habits yet. Tap + to create one.</Text>}
         renderItem={({ item }) => (

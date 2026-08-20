@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import { FlatList, StyleSheet, View } from 'react-native';
 import { Button, Dialog, FAB, Portal, Text } from 'react-native-paper';
 import { useAuthStore } from '../../features/auth/authStore';
@@ -10,7 +10,7 @@ import { buildGoalPayload } from '../../services/taskFactory';
 import { goalRepository } from '../../database/contentRepository';
 import { EntityCard } from '../../components/EntityCard';
 import type { Goal, GoalPeriod, GoalKind, GoalStatus } from '../../types';
-import { todayDateKey } from '../../utils/date';
+import { parseTimeToMinutes, todayDateKey } from '../../utils/date';
 import { describeSchedule } from '../../utils/schedule';
 import { goalToFormValues } from '../../utils/formValues';
 import { ScreenScaffold } from '../../components/ScreenScaffold';
@@ -52,6 +52,14 @@ export function GoalsScreen() {
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(false);
   const [pendingDelete, setPendingDelete] = useState<Goal | null>(null);
+
+  const sortedGoals = useMemo(
+    () =>
+      [...goals].sort(
+        (a, b) => parseTimeToMinutes(a.reminder.time) - parseTimeToMinutes(b.reminder.time),
+      ),
+    [goals],
+  );
 
   async function setGoalStatus(goal: Goal, status: GoalStatus) {
     if (!user) return;
@@ -194,7 +202,7 @@ export function GoalsScreen() {
     <ScreenScaffold>
       <FlatList
         contentContainerStyle={styles.list}
-        data={goals}
+        data={sortedGoals}
         keyExtractor={(item) => item.id}
         ListEmptyComponent={<Text style={styles.empty}>No goals yet.</Text>}
         renderItem={({ item }) => (

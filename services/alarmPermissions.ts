@@ -13,7 +13,7 @@ async function ensureChannel(): Promise<void> {
     enableLights: true,
     lockscreenVisibility: Notifications.AndroidNotificationVisibility.PUBLIC,
     bypassDnd: true,
-    sound: 'default',
+    sound: 'alarm_default.wav',
   });
 }
 
@@ -68,6 +68,23 @@ export async function openExactAlarmSettings(): Promise<void> {
   }
 }
 
+/** Opens battery optimization / app details so OEMs don’t kill scheduled alarms. */
+export async function openBatteryOptimizationSettings(): Promise<void> {
+  if (Platform.OS !== 'android') {
+    await Linking.openSettings();
+    return;
+  }
+  try {
+    await Linking.sendIntent('android.settings.IGNORE_BATTERY_OPTIMIZATION_SETTINGS');
+  } catch {
+    try {
+      await Linking.openSettings();
+    } catch {
+      // ignore
+    }
+  }
+}
+
 let exactAlarmTipShown = false;
 
 /** One tip per app session when scheduling may be blocked by OEM / Android 12+ rules. */
@@ -76,10 +93,11 @@ export function warnIfAlarmMayBeBlocked(): void {
   exactAlarmTipShown = true;
   Alert.alert(
     'Allow exact alarms',
-    'On Android 12+, timed reminders need “Alarms & reminders” enabled for Discipline AI. Without it, the OS may delay or skip the alarm when the app is closed.\n\nAlso turn off battery optimization for this app if reminders still miss.',
+    'On Android 12+, timed reminders need “Alarms & reminders” enabled for Discipline AI. Without it, the OS may delay or skip the alarm when the app is closed.\n\nAlso disable battery optimization for this app (and any OEM “auto-start” / “sleeping apps” restrictions). Expo cannot use the system Clock app — reliability depends on these OS settings.',
     [
       { text: 'Later', style: 'cancel' },
-      { text: 'Open alarm settings', onPress: () => void openExactAlarmSettings() },
+      { text: 'Battery settings', onPress: () => void openBatteryOptimizationSettings() },
+      { text: 'Alarm settings', onPress: () => void openExactAlarmSettings() },
     ],
   );
 }

@@ -2,6 +2,8 @@ node_modules/
 .expo/
 dist/
 .env
+functions/.env
+functions/.secret.local
 *.log
 functions/lib/
 google-services.json

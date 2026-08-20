@@ -10,12 +10,17 @@ export interface ActiveAlarm {
 
 interface AlarmState {
   active: ActiveAlarm | null;
+  /** Notification arrived before tasks/auth were ready — retry after sync. */
+  pendingTaskId: string | null;
   openAlarm: (payload: ActiveAlarm) => void;
   clearAlarm: () => void;
+  setPendingTaskId: (taskId: string | null) => void;
 }
 
 export const useAlarmStore = create<AlarmState>((set) => ({
   active: null,
-  openAlarm: (active) => set({ active }),
+  pendingTaskId: null,
+  openAlarm: (active) => set({ active, pendingTaskId: null }),
   clearAlarm: () => set({ active: null }),
+  setPendingTaskId: (pendingTaskId) => set({ pendingTaskId }),
 }));

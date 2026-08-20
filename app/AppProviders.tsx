@@ -4,16 +4,22 @@ import { PaperProvider } from 'react-native-paper';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { StatusBar } from 'expo-status-bar';
-import { AppState, StyleSheet } from 'react-native';
+import { StyleSheet } from 'react-native';
+import * as Notifications from 'expo-notifications';
 import { RootNavigator } from '../navigation/RootNavigator';
 import { useAuthBootstrap } from '../hooks/useAuthBootstrap';
 import { useDataSync } from '../hooks/useDataSync';
 import { useAppTheme } from '../hooks/useAppTheme';
 import { useAuthStore } from '../features/auth/authStore';
+import { useAlarmStore } from '../features/alarm/alarmStore';
 import { LoadingState } from '../components/LoadingState';
 import { AlarmRingHost } from '../components/AlarmRingHost';
 import { registerForPushNotifications } from '../notifications/pushService';
-import { startAlarmListeners, ringOverdueAlarms } from '../services/alarmService';
+import {
+  startAlarmListeners,
+  flushAlarmsAfterDataReady,
+  openAlarmForTask,
+} from '../services/alarmService';
 import { useSettingsStore } from '../features/settings/settingsStore';
 
 function AppShell() {
@@ -23,26 +29,38 @@ function AppShell() {
   const initialized = useAuthStore((s) => s.initialized);
   const loading = useAuthStore((s) => s.loading);
   const loadSettings = useSettingsStore((s) => s.load);
+  const lastNotificationResponse = Notifications.useLastNotificationResponse();
+
+  useEffect(() => {
+    const stop = startAlarmListeners();
+    return stop;
+  }, []);
+
+  useEffect(() => {
+    const data = lastNotificationResponse?.notification.request.content.data as
+      | { kind?: string; taskId?: string }
+      | undefined;
+    const taskId = data?.taskId;
+    if (!taskId) return;
+    if (data.kind && data.kind !== 'discipline_alarm') return;
+    useAlarmStore.getState().setPendingTaskId(taskId);
+    void openAlarmForTask(taskId, 'tap');
+  }, [lastNotificationResponse]);
 
   useEffect(() => {
     if (!user) return;
     loadSettings(user.uid);
     registerForPushNotifications(user.uid).catch(() => undefined);
-    const stop = startAlarmListeners();
-    void ringOverdueAlarms(user.uid);
-
-    const appState = AppState.addEventListener('change', (state) => {
-      if (state === 'active') void ringOverdueAlarms(user.uid);
-    });
-
-    return () => {
-      stop();
-      appState.remove();
-    };
+    void flushAlarmsAfterDataReady(user.uid);
   }, [user, loadSettings]);
 
   if (!initialized || loading) {
-    return <LoadingState message="Starting Discipline AI…" />;
+    return (
+      <>
+        <LoadingState message="Starting Discipline AI…" />
+        <AlarmRingHost />
+      </>
+    );
   }
 
   return (

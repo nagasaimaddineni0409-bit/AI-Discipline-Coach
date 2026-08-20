@@ -36,11 +36,12 @@ Cross-platform discipline coaching app (Android, iOS, Web) built with **Expo (Re
 2. Enable **Email**, **Google**, and **Apple** auth in Firebase Console.
 3. Deploy Firestore rules and indexes: `firebase deploy --only firestore`
 4. Install functions: `cd functions && npm install && npm run build`
+5. **Weekly review email** (Monday 07:00 IST): copy `functions/.env.example` to `functions/.env` and set `RESEND_API_KEY` + a verified `MAIL_FROM`, or SMTP credentials. Deploy functions: `firebase deploy --only functions`. Users can also tap **Email me this week’s review** in Settings.
 5. Run app: `npm start` then `w` / `a` / `i`
 
 ## Version 1 scope
 
-Implemented: auth, profile, dashboard, habits, goals, reminders (complete/skip/snooze), BDI, reports (daily summary / weekly / monthly / milestones), settings, push registration, admin panel shell, Cloud Functions for weekly reports & admin analytics.
+Implemented: auth, profile, dashboard, habits, goals, reminders (complete/skip/snooze), BDI, reports (daily summary / weekly / monthly / milestones), Monday clinical weekly-review emails, settings, push registration, admin panel shell, Cloud Functions for weekly reports & admin analytics.
 
 Architected but **disabled**: Firebase Storage/file uploads, premium billing, PDF export, wearables, conversational AI.
 

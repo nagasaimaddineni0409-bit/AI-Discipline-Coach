@@ -24,6 +24,7 @@ import {
   ensureAlarmPermissions,
   openExactAlarmSettings,
 } from '../../services/alarmPermissions';
+import { requestWeeklyReportEmail } from '../../services/weeklyReportEmail';
 import type { ThemeMode } from '../../types';
 import { RootStackParamList } from '../../navigation/types';
 
@@ -46,6 +47,7 @@ export function SettingsScreen({ navigation }: Props) {
 
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const [emailingReport, setEmailingReport] = useState(false);
   const [snack, setSnack] = useState<string | null>(null);
 
   useEffect(() => {
@@ -101,7 +103,7 @@ export function SettingsScreen({ navigation }: Props) {
           Settings
         </Text>
         <Text variant="bodyMedium" style={[styles.pageSubtitle, { color: palette.textMuted }]}>
-          Appearance, reminders, and account
+          Appearance, reminders, weekly review email, and account
         </Text>
 
         <AppCard>
@@ -175,6 +177,48 @@ export function SettingsScreen({ navigation }: Props) {
               />
             </>
           ) : null}
+        </AppCard>
+
+        <AppCard>
+          <Text variant="titleMedium" style={styles.cardTitle}>
+            Weekly behavioural review
+          </Text>
+          <Text variant="bodySmall" style={[styles.cardHint, { color: palette.textMuted }]}>
+            Every Monday we email a clinical-style analysis of how you met your alarms — written
+            as a senior behaviour analyst would brief you, using your own response data.
+          </Text>
+          <SettingToggle
+            title="Email my weekly review"
+            subtitle={`Sent to ${profile?.email ?? 'your registered email'}`}
+            value={settings?.weeklyEmailEnabled ?? true}
+            onValueChange={(weeklyEmailEnabled) => {
+              if (user) void patch(user.uid, { weeklyEmailEnabled });
+            }}
+          />
+          <View style={[styles.divider, { backgroundColor: palette.divider }]} />
+          <Button
+            mode="contained"
+            icon="email-outline"
+            loading={emailingReport}
+            disabled={emailingReport || (settings?.weeklyEmailEnabled ?? true) === false}
+            onPress={async () => {
+              setEmailingReport(true);
+              try {
+                const sent = await requestWeeklyReportEmail();
+                setSnack(`Review sent to ${sent.to}`);
+              } catch (e) {
+                setSnack(formatAuthError(e, 'Could not send this week’s review email.'));
+              } finally {
+                setEmailingReport(false);
+              }
+            }}
+            buttonColor={palette.accent}
+            textColor={palette.onAccent}
+            style={styles.actionBtn}
+            contentStyle={styles.actionBtnContent}
+          >
+            Email me this week’s review
+          </Button>
         </AppCard>
 
         <AppCard>

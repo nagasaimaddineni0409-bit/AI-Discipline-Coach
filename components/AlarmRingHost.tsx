@@ -1,17 +1,20 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { StyleSheet, View, Vibration, Platform } from 'react-native';
+import { StyleSheet, View, Vibration, Platform, StatusBar } from 'react-native';
 import { createAudioPlayer, setAudioModeAsync, type AudioPlayer } from 'expo-audio';
 import { Button, Text } from 'react-native-paper';
 import { LinearGradient } from 'expo-linear-gradient';
+import * as Notifications from 'expo-notifications';
 import { SNOOZE_OPTIONS } from '../constants/categories';
 import { useAlarmStore } from '../features/alarm/alarmStore';
 import { completeTask, skipTask, snoozeTask } from '../services/reminderActions';
 import { useBrandPalette } from '../hooks/useBrandPalette';
 import type { SnoozeDurationMinutes } from '../types';
 
+const DEFAULT_ALARM_SOUND = require('../assets/sounds/alarm_default.wav');
+
 /**
- * Full-screen ringing alarm. This is the product differentiator:
- * the user must Complete / Skip / Snooze — and that action feeds BDI.
+ * Full-screen ringing alarm (Clock-style UI inside the app).
+ * Plays a looping tone + vibration until Complete / Skip / Snooze.
  */
 export function AlarmRingHost() {
   const active = useAlarmStore((s) => s.active);
@@ -27,6 +30,13 @@ export function AlarmRingHost() {
     let cancelled = false;
 
     async function startRinging() {
+      // Drop the tray notification so the user hears OUR looping alarm, not a short OS beep.
+      try {
+        await Notifications.dismissAllNotificationsAsync();
+      } catch {
+        // ignore
+      }
+
       try {
         await setAudioModeAsync({
           playsInSilentMode: true,
@@ -36,22 +46,21 @@ export function AlarmRingHost() {
         });
 
         const uri = active?.reminder.customToneUri;
-        if (uri) {
-          const player = createAudioPlayer({ uri });
-          if (cancelled) {
-            player.remove();
-            return;
-          }
-          player.loop = true;
-          player.volume = 1;
-          player.play();
-          playerRef.current = player;
+        const player = uri
+          ? createAudioPlayer({ uri })
+          : createAudioPlayer(DEFAULT_ALARM_SOUND);
+        if (cancelled) {
+          player.remove();
+          return;
         }
+        player.loop = true;
+        player.volume = 1;
+        player.play();
+        playerRef.current = player;
       } catch {
-        // Fall through to vibration if the custom file can't play.
+        // Fall through to vibration if audio fails.
       }
 
-      // Persistent vibration pattern — works even when no custom audio is available.
       Vibration.vibrate(
         Platform.OS === 'android'
           ? [0, 800, 400, 800, 400, 800]
@@ -96,7 +105,7 @@ export function AlarmRingHost() {
     if (!active || acting) return;
     setActing(true);
     try {
-      await stopRinging();
+      stopRinging();
       await action();
       clearAlarm();
       setSnoozeOpen(false);
@@ -111,6 +120,7 @@ export function AlarmRingHost() {
 
   return (
     <View style={styles.overlay} pointerEvents="auto">
+      <StatusBar barStyle="light-content" />
       <LinearGradient
         colors={['#071018', '#0A3D3A', '#14B8A6']}
         start={{ x: 0, y: 0 }}

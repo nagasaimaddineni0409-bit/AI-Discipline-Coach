@@ -1,7 +1,9 @@
 import { initializeApp, getApps, FirebaseApp } from 'firebase/app';
-import { getAuth, Auth } from 'firebase/auth';
+import { initializeAuth, getAuth, Auth, type Persistence } from 'firebase/auth';
 import { getFirestore, Firestore } from 'firebase/firestore';
 import { getFunctions, Functions } from 'firebase/functions';
+import { Platform } from 'react-native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
 const firebaseConfig = {
   apiKey: process.env.EXPO_PUBLIC_FIREBASE_API_KEY ?? '',
@@ -26,9 +28,37 @@ export function getFirebaseApp(): FirebaseApp {
   return app;
 }
 
+/**
+ * React Native build of @firebase/auth exports this; the default firebase/auth
+ * typings are browser-oriented and omit it.
+ */
+function reactNativePersistence(): Persistence {
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const rnAuth = require('@firebase/auth') as {
+    getReactNativePersistence: (storage: typeof AsyncStorage) => Persistence;
+  };
+  return rnAuth.getReactNativePersistence(AsyncStorage);
+}
+
+/**
+ * Auth with AsyncStorage persistence on native so the session survives
+ * process death (swiped away), like Swiggy / Zomato. Web keeps browser defaults.
+ */
 export function getFirebaseAuth(): Auth {
   if (!auth) {
-    auth = getAuth(getFirebaseApp());
+    const firebaseApp = getFirebaseApp();
+    if (Platform.OS === 'web') {
+      auth = getAuth(firebaseApp);
+    } else {
+      try {
+        auth = initializeAuth(firebaseApp, {
+          persistence: reactNativePersistence(),
+        });
+      } catch {
+        // Hot reload / already initialized in this JS runtime.
+        auth = getAuth(firebaseApp);
+      }
+    }
   }
   return auth;
 }

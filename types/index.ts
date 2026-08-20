@@ -240,6 +240,8 @@ export interface UserSettings {
   notificationsEnabled: boolean;
   reminderSoundsEnabled: boolean;
   defaultReminderToneId: string;
+  /** Monday clinical review emailed to the registered address. Default true. */
+  weeklyEmailEnabled?: boolean;
   pushToken?: string | null;
   updatedAt: string;
 }

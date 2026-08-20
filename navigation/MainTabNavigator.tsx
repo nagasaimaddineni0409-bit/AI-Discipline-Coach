@@ -1,8 +1,8 @@
 import React from 'react';
-import { Platform } from 'react-native';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import MaterialCommunityIcons from '@expo/vector-icons/MaterialCommunityIcons';
 import { IconButton } from 'react-native-paper';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { DashboardScreen } from '../screens/main/DashboardScreen';
 import { HabitsScreen } from '../screens/main/HabitsScreen';
 import { GoalsScreen } from '../screens/main/GoalsScreen';
@@ -16,6 +16,8 @@ const Tab = createBottomTabNavigator<MainTabParamList>();
 export function MainTabNavigator() {
   const theme = useTheme();
   const isDark = theme.dark;
+  const insets = useSafeAreaInsets();
+  const tabBarHeight = 56 + insets.bottom;
 
   return (
     <Tab.Navigator
@@ -43,7 +45,8 @@ export function MainTabNavigator() {
           backgroundColor: isDark ? AUTH.panelSolid : theme.colors.elevation.level2,
           borderTopColor: isDark ? AUTH.panelBorder : theme.colors.outline,
           borderTopWidth: 1,
-          height: Platform.OS === 'ios' ? 88 : 64,
+          height: tabBarHeight,
+          paddingBottom: insets.bottom,
           paddingTop: 6,
         },
         tabBarActiveTintColor: isDark ? AUTH.tealSoft : theme.colors.primary,

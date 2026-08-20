@@ -37,10 +37,20 @@ function buildRepeatRule(input: ScheduleInput): RepeatRule {
   return rule;
 }
 
+/** One task per habit per calendar day — stable id prevents create/sync races from duplicating. */
+export function taskIdForHabitDay(habitId: string, dateKey: string): string {
+  return `${habitId}_${dateKey}`;
+}
+
+/** One primary alarm reminder per task — same id so reschedules overwrite instead of stacking. */
+export function reminderIdForTask(taskId: string): string {
+  return `${taskId}_reminder`;
+}
+
 export function createTaskFromHabit(habit: Habit, dateKey = todayDateKey()): Task {
   const now = new Date().toISOString();
   return {
-    id: generateId(),
+    id: taskIdForHabitDay(habit.id, dateKey),
     userId: habit.userId,
     habitId: habit.id,
     title: habit.title,
@@ -63,7 +73,7 @@ export function createReminderFromTask(
   const scheduledAt = localDateTimeIso(task.scheduledDate, task.scheduledTime);
   const now = new Date().toISOString();
   return {
-    id: generateId(),
+    id: reminderIdForTask(task.id),
     userId: task.userId,
     taskId: task.id,
     title: task.title,

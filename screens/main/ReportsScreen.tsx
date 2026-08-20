@@ -135,8 +135,9 @@ export function ReportsScreen() {
     <ScreenScaffold>
       <ScrollView contentContainerStyle={styles.container}>
         <Text variant="bodyMedium" style={styles.intro}>
-          Your discipline score comes from how you handle reminders. Open History to see every
-          complete, skip, and snooze.
+          Your discipline score comes from how you handle reminders. Completing late still counts,
+          but delay minutes lower the quality contribution. Open History to see every complete,
+          skip, and snooze.
         </Text>
 
         <SegmentedButtons
