@@ -134,6 +134,23 @@ export function computeConsistency(dailyCompletionFlags: boolean[]): number {
 }
 
 /**
+ * Consecutive days ending today (or yesterday if today has no completion yet)
+ * with at least one completed alarm.
+ */
+export function computeCurrentStreakDays(dailyCompletionFlags: boolean[]): number {
+  if (!dailyCompletionFlags.length) return 0;
+  let end = dailyCompletionFlags.length - 1;
+  // If today is still empty, count from yesterday so the streak doesn't drop midday.
+  if (!dailyCompletionFlags[end] && end > 0) end -= 1;
+  let streak = 0;
+  for (let i = end; i >= 0; i--) {
+    if (!dailyCompletionFlags[i]) break;
+    streak += 1;
+  }
+  return streak;
+}
+
+/**
  * For each of the last `days` days, whether the user completed at least one
  * alarm/task that day. Used to measure consistency.
  */

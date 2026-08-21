@@ -94,7 +94,7 @@ export function DashboardScreen({ navigation }: Props) {
     );
   }, [monthlyGoals]);
 
-  // Prefer a due/overdue task (the one that just rang) over the next future reminder.
+  // Prefer a due/overdue task; else show next scheduled reminder (may be tomorrow+).
   const upcomingTask = useMemo(() => {
     const now = Date.now() + ACT_GRACE_MS;
     const dueLocal = visibleTasks
@@ -112,18 +112,31 @@ export function DashboardScreen({ navigation }: Props) {
 
     if (!upcomingReminder) return null;
     const task = visibleTasks.find((t) => t.id === upcomingReminder.taskId);
-    if (!task || !isActionable(task)) return null;
-    return task;
-  }, [upcomingReminder, visibleTasks]);
+    if (task && isActionable(task)) return task;
+    // Lookahead reminder: synthesize a lightweight task from the reminder so UI can show it.
+    return {
+      id: upcomingReminder.taskId,
+      userId: upcomingReminder.userId,
+      title: upcomingReminder.title,
+      description: upcomingReminder.description,
+      category: 'personal' as const,
+      scheduledDate: upcomingReminder.scheduledAt.slice(0, 10),
+      scheduledTime: new Date(upcomingReminder.scheduledAt).toTimeString().slice(0, 5),
+      priority: 'medium' as const,
+      status: 'pending' as const,
+      createdAt: upcomingReminder.createdAt,
+      updatedAt: upcomingReminder.updatedAt,
+      habitId: habits.find((h) => upcomingReminder.taskId.startsWith(`${h.id}_`))?.id,
+    } satisfies Task;
+  }, [upcomingReminder, visibleTasks, habits]);
 
   const reminderDue = useMemo(() => {
-    if (!upcomingTask) return false;
-    const dueAt =
-      upcomingTask.status === 'snoozed' && upcomingTask.snoozedUntil
-        ? new Date(upcomingTask.snoozedUntil).getTime()
-        : upcomingReminder?.taskId === upcomingTask.id
-          ? new Date(upcomingReminder.scheduledAt).getTime()
-          : localDateTimeFromKey(upcomingTask.scheduledDate, upcomingTask.scheduledTime).getTime();
+    if (!upcomingReminder && !upcomingTask) return false;
+    const dueAt = upcomingReminder
+      ? new Date(upcomingReminder.scheduledAt).getTime()
+      : upcomingTask
+        ? localDateTimeFromKey(upcomingTask.scheduledDate, upcomingTask.scheduledTime).getTime()
+        : Number.POSITIVE_INFINITY;
     return dueAt <= Date.now() + ACT_GRACE_MS;
   }, [upcomingTask, upcomingReminder]);
 
@@ -133,7 +146,7 @@ export function DashboardScreen({ navigation }: Props) {
   );
 
   async function openAct(task: Task) {
-    if (!isActionable(task) || acting || !reminderDue) return;
+    if (acting || !reminderDue) return;
     setActing(true);
     try {
       await openAlarmForTask(task.id, 'manual');
@@ -188,19 +201,23 @@ export function DashboardScreen({ navigation }: Props) {
 
         <AppCard>
           <Text variant="titleMedium">Next reminder</Text>
-          {upcomingTask ? (
+          {upcomingReminder || upcomingTask ? (
             <>
-              <Pressable onPress={openEditHabit} disabled={!upcomingTask.habitId}>
-                <Text variant="bodyLarge">{upcomingTask.title}</Text>
-                <Text variant="bodySmall">
-                  {upcomingReminder?.taskId === upcomingTask.id
-                    ? new Date(upcomingReminder.scheduledAt).toLocaleString()
-                    : localDateTimeFromKey(
-                        upcomingTask.scheduledDate,
-                        upcomingTask.scheduledTime,
-                      ).toLocaleString()}
+              <Pressable onPress={openEditHabit} disabled={!upcomingTask?.habitId}>
+                <Text variant="bodyLarge">
+                  {upcomingReminder?.title ?? upcomingTask?.title}
                 </Text>
-                {upcomingTask.habitId ? (
+                <Text variant="bodySmall">
+                  {upcomingReminder
+                    ? new Date(upcomingReminder.scheduledAt).toLocaleString()
+                    : upcomingTask
+                      ? localDateTimeFromKey(
+                          upcomingTask.scheduledDate,
+                          upcomingTask.scheduledTime,
+                        ).toLocaleString()
+                      : ''}
+                </Text>
+                {upcomingTask?.habitId ? (
                   <Text variant="labelSmall" style={styles.tapHint}>
                     Tap to edit habit
                   </Text>
@@ -213,8 +230,8 @@ export function DashboardScreen({ navigation }: Props) {
                 style={styles.cardAction}
                 contentStyle={styles.goalBtnContent}
                 labelStyle={styles.goalBtnLabel}
-                onPress={() => openAct(upcomingTask)}
-                disabled={acting || !reminderDue}
+                onPress={() => upcomingTask && openAct(upcomingTask)}
+                disabled={acting || !reminderDue || !upcomingTask}
               >
                 {reminderDue ? 'Act' : 'Not due yet'}
               </Button>

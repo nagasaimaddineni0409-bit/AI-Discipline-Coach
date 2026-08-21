@@ -1,17 +1,40 @@
 import type { GoalStatus, Habit, Task } from '../types';
-import { todayDateKey } from '../utils/date';
+import { addDaysToDateKey, todayDateKey } from '../utils/date';
 import {
   habitRepository,
   taskRepository,
 } from '../database/contentRepository';
 import { useDataStore } from '../features/data/dataStore';
 import { refreshUpcomingReminder } from './reminderActions';
-import { matchesSchedule } from '../utils/schedule';
+import { matchesSchedule, isHabitScheduleEnded } from '../utils/schedule';
 import { createReminderFromTask, createTaskFromHabit } from './taskFactory';
 import { cancelAlarmsForTask, upsertReminderWithAlarm } from './alarmScheduler';
+import { ALARM_LOOKAHEAD_DAYS } from './dailyTaskScheduler';
 
 async function settleRemindersForTasks(uid: string, taskIds: string[]): Promise<void> {
   await Promise.all(taskIds.map((taskId) => cancelAlarmsForTask(uid, taskId)));
+}
+
+/** Drop pending/snoozed tasks for a habit across today + alarm lookahead window. */
+export async function removePendingTasksForHabit(uid: string, habitId: string): Promise<void> {
+  const today = todayDateKey();
+  const removeIds = new Set<string>();
+  for (let offset = 0; offset <= ALARM_LOOKAHEAD_DAYS; offset++) {
+    const dateKey = addDaysToDateKey(today, offset);
+    const dayTasks = await taskRepository.listForDate(uid, dateKey);
+    for (const t of dayTasks) {
+      if (t.habitId !== habitId) continue;
+      if (t.status !== 'pending' && t.status !== 'snoozed') continue;
+      removeIds.add(t.id);
+      await cancelAlarmsForTask(uid, t.id);
+      await taskRepository.removeByUser(uid, t.id);
+    }
+  }
+  if (removeIds.size) {
+    const { tasks, setTasks } = useDataStore.getState();
+    setTasks(tasks.filter((t) => !removeIds.has(t.id)));
+  }
+  await refreshUpcomingReminder(uid);
 }
 
 /** Drop every one of today's tasks for a habit (any status) and settle their reminders. */
@@ -71,7 +94,7 @@ export async function setHabitStatusCascade(
     matchesSchedule(updated.repeatRule, dateKey);
 
   if (!shouldSchedule) {
-    await removeTodayTasksForHabit(uid, habit.id);
+    await removePendingTasksForHabit(uid, habit.id);
     return;
   }
 
@@ -94,6 +117,32 @@ export async function setHabitStatusCascade(
 }
 
 /**
+ * Archive habits whose once/endDate window is over.
+ * Past behaviour events stay in History; only the active Habits list is cleaned.
+ */
+export async function expireHabitsPastSchedule(uid: string, habits: Habit[]): Promise<Habit[]> {
+  const today = todayDateKey();
+  const next: Habit[] = [];
+  for (const habit of habits) {
+    if (habit.status !== 'active' || !isHabitScheduleEnded(habit.repeatRule, today)) {
+      next.push(habit);
+      continue;
+    }
+    const updated: Habit = {
+      ...habit,
+      status: 'archived',
+      updatedAt: new Date().toISOString(),
+    };
+    await habitRepository.upsert(uid, updated);
+    await removePendingTasksForHabit(uid, habit.id);
+    next.push(updated);
+  }
+  const { setHabits } = useDataStore.getState();
+  setHabits(next);
+  return next;
+}
+
+/**
  * Remove orphan Dashboard tasks whose habit was deleted or is no longer active.
  * Runs after habit list sync so screens stay aligned even if a delete missed a task.
  */
@@ -109,6 +158,8 @@ export async function reconcileTasksWithHabits(
     const habit = byId.get(t.habitId);
     if (!habit) return true; // habit deleted
     if (habit.status !== 'active') return true; // paused / archived
+    if (isHabitScheduleEnded(habit.repeatRule, dateKey)) return true;
+    if (!matchesSchedule(habit.repeatRule, dateKey)) return true;
     return false;
   });
 

@@ -41,7 +41,15 @@ export function ProfileScreen({}: Props) {
         <Text variant="bodyMedium" style={styles.meta}>
           Email: {profile?.email}
         </Text>
-        <Text variant="bodyMedium">Streak: {profile?.currentStreakDays ?? 0} days</Text>
+        <Text variant="bodyMedium">
+          Streak: {profile?.currentStreakDays ?? 0} days
+          {profile?.longestStreakDays
+            ? ` (best ${profile.longestStreakDays})`
+            : ''}
+        </Text>
+        <Text variant="bodySmall" style={styles.meta}>
+          Days in a row with at least one completed reminder
+        </Text>
         <Text variant="bodyMedium">BDI: {profile?.bdiScore ?? 0}</Text>
         <Button mode="contained" onPress={save} loading={loading} style={styles.btn}>
           Save

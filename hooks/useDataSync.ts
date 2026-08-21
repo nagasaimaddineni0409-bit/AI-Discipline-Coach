@@ -1,4 +1,4 @@
-import { useEffect } from 'react';
+import { useEffect, useRef } from 'react';
 import { AppState, type AppStateStatus } from 'react-native';
 import NetInfo from '@react-native-community/netinfo';
 import { useDataStore } from '../features/data/dataStore';
@@ -14,13 +14,18 @@ import {
   calculateBdi,
   computeConsistency,
   buildDailyCompletionFlags,
+  computeCurrentStreakDays,
 } from '../services/bdiService';
 import { cacheGet, cacheSet } from '../services/cacheService';
 import { ensureDailyTasksForHabits } from '../services/dailyTaskScheduler';
-import { reconcileTasksWithHabits } from '../services/habitLifecycle';
+import {
+  expireHabitsPastSchedule,
+  reconcileTasksWithHabits,
+} from '../services/habitLifecycle';
 import { refreshUpcomingReminder } from '../services/reminderActions';
 import { ensureAllPendingAlarmsScheduled } from '../services/alarmScheduler';
 import { flushAlarmsAfterDataReady } from '../services/alarmService';
+import { userRepository } from '../database/userRepository';
 import type { Habit, Goal, Task } from '../types';
 
 export function useDataSync() {
@@ -34,15 +39,16 @@ export function useDataSync() {
     setBdi,
     setSyncing,
   } = useDataStore();
+  const subscribedDateRef = useRef(todayDateKey());
 
   useEffect(() => {
     if (!user) return;
 
     const uid = user.uid;
-    const dateKey = todayDateKey();
     let cancelled = false;
+    let unsubTasks: (() => void) | null = null;
 
-    async function hydrateCache() {
+    async function hydrateCache(dateKey: string) {
       const cached = await cacheGet<{
         habits: Habit[];
         goals: Goal[];
@@ -64,14 +70,26 @@ export function useDataSync() {
       }
     }
 
-    hydrateCache();
-    setSyncing(true);
+    function bindTodayTasks(dateKey: string) {
+      unsubTasks?.();
+      subscribedDateRef.current = dateKey;
+      unsubTasks = taskRepository.subscribeToday(uid, dateKey, async (tasks) => {
+        setTasks(tasks);
+        if (!cancelled) {
+          await refreshUpcomingReminder(uid);
+          await flushAlarmsAfterDataReady(uid);
+        }
+      });
+    }
 
-    const unsubHabits = habitRepository.subscribeByUser(uid, async (habits) => {
-      setHabits(habits);
+    /** Create/reschedule today's + lookahead alarms; archive ended habits. */
+    async function syncHabitAlarms(habitsIn: Habit[]) {
       const today = todayDateKey();
+      if (today !== subscribedDateRef.current) {
+        bindTodayTasks(today);
+      }
+      const habits = await expireHabitsPastSchedule(uid, habitsIn);
       const existing = await taskRepository.listForDate(uid, today);
-      // Drop tasks for deleted / paused / archived habits so Dashboard stays in sync.
       await reconcileTasksWithHabits(uid, habits, existing);
       const remaining = await taskRepository.listForDate(uid, today);
       await ensureDailyTasksForHabits(uid, habits, remaining);
@@ -80,16 +98,19 @@ export function useDataSync() {
         await rescheduleAlarms();
         await flushAlarmsAfterDataReady(uid);
       }
+    }
+
+    const dateKey = todayDateKey();
+    hydrateCache(dateKey);
+    setSyncing(true);
+    bindTodayTasks(dateKey);
+
+    const unsubHabits = habitRepository.subscribeByUser(uid, async (habits) => {
+      setHabits(habits);
+      await syncHabitAlarms(habits);
     });
     const unsubGoals = goalRepository.subscribeByUser(uid, (goals) => {
       setGoals(goals);
-    });
-    const unsubTasks = taskRepository.subscribeToday(uid, dateKey, async (tasks) => {
-      setTasks(tasks);
-      if (!cancelled) {
-        await refreshUpcomingReminder(uid);
-        await flushAlarmsAfterDataReady(uid);
-      }
     });
 
     (async () => {
@@ -103,6 +124,7 @@ export function useDataSync() {
 
         const weeklyFlags = buildDailyCompletionFlags(events, 7);
         const monthlyFlags = buildDailyCompletionFlags(events, 30);
+        const streakFlags = buildDailyCompletionFlags(events, 90);
         const goals = await goalRepository.listByUser(uid);
         const goalCompletion =
           goals.filter((g) => g.progress >= g.target).length / Math.max(goals.length, 1);
@@ -115,9 +137,31 @@ export function useDataSync() {
         });
         setBdi(bdi);
 
+        const currentStreakDays = computeCurrentStreakDays(streakFlags);
+        const existingProfile = useAuthStore.getState().profile;
+        const longestStreakDays = Math.max(
+          existingProfile?.longestStreakDays ?? 0,
+          currentStreakDays,
+        );
+        await userRepository.updateBdi(uid, bdi.score, bdi.weeklyChange, bdi.monthlyChange, {
+          currentStreakDays,
+          longestStreakDays,
+        });
+        if (existingProfile?.uid === uid) {
+          useAuthStore.getState().setProfile({
+            ...existingProfile,
+            bdiScore: bdi.score,
+            bdiWeeklyDelta: bdi.weeklyChange,
+            bdiMonthlyDelta: bdi.monthlyChange,
+            currentStreakDays,
+            longestStreakDays,
+          });
+        }
+
         const habits = await habitRepository.listByUser(uid);
-        const tasks = await taskRepository.listForDate(uid, dateKey);
-        await cacheSet(`data_${uid}_${dateKey}`, { habits, goals, tasks });
+        await syncHabitAlarms(habits);
+        const tasks = await taskRepository.listForDate(uid, todayDateKey());
+        await cacheSet(`data_${uid}_${todayDateKey()}`, { habits, goals, tasks });
       } finally {
         if (!cancelled) setSyncing(false);
       }
@@ -127,12 +171,17 @@ export function useDataSync() {
       if (state.isConnected) setSyncing(false);
     });
 
-    // Re-verify OS schedules when returning from background (OEMs may have dropped them).
+    // On foreground: rebuild today's + lookahead schedules (covers midnight rollover).
     const onAppState = (next: AppStateStatus) => {
-      if (next === 'active' && !cancelled) {
-        void rescheduleAlarms();
-        void flushAlarmsAfterDataReady(uid);
-      }
+      if (next !== 'active' || cancelled) return;
+      void (async () => {
+        const habits = useDataStore.getState().habits;
+        if (habits.length) await syncHabitAlarms(habits);
+        else {
+          await rescheduleAlarms();
+          await flushAlarmsAfterDataReady(uid);
+        }
+      })();
     };
     const appStateSub = AppState.addEventListener('change', onAppState);
 
@@ -140,7 +189,7 @@ export function useDataSync() {
       cancelled = true;
       unsubHabits();
       unsubGoals();
-      unsubTasks();
+      unsubTasks?.();
       netUnsub();
       appStateSub.remove();
     };

@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { Pressable, Platform, ScrollView, StyleSheet, View } from 'react-native';
+import { Pressable, Platform, ScrollView, Share, StyleSheet, View } from 'react-native';
 import {
   Button,
   Dialog,
@@ -13,8 +13,10 @@ import {
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { useAuthStore } from '../../features/auth/authStore';
 import { useSettingsStore } from '../../features/settings/settingsStore';
+import { useDataStore } from '../../features/data/dataStore';
 import { logoutUser, deleteAuthUser } from '../../firebase/auth';
 import { cacheClearAll } from '../../services/cacheService';
+import { behaviourEventRepository } from '../../database/contentRepository';
 import { DEFAULT_FEATURE_FLAGS } from '../../constants/featureFlags';
 import { ScreenScaffold } from '../../components/ScreenScaffold';
 import { AppCard } from '../../components/AppCard';
@@ -44,10 +46,14 @@ export function SettingsScreen({ navigation }: Props) {
   const setUser = useAuthStore((s) => s.setUser);
   const setProfile = useAuthStore((s) => s.setProfile);
   const { settings, load, setTheme, patch } = useSettingsStore();
+  const habits = useDataStore((s) => s.habits);
+  const goals = useDataStore((s) => s.goals);
+  const tasks = useDataStore((s) => s.tasks);
 
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [emailingReport, setEmailingReport] = useState(false);
+  const [exporting, setExporting] = useState(false);
   const [snack, setSnack] = useState<string | null>(null);
 
   useEffect(() => {
@@ -60,7 +66,33 @@ export function SettingsScreen({ navigation }: Props) {
   }
 
   async function exportData() {
-    setSnack('Export is queued. You will get a download when premium export is enabled.');
+    if (!user) return;
+    setExporting(true);
+    try {
+      const events = await behaviourEventRepository.listRecent(user.uid, 90);
+      const payload = {
+        exportedAt: new Date().toISOString(),
+        profile: {
+          email: profile?.email,
+          displayName: profile?.displayName,
+          bdiScore: profile?.bdiScore,
+          currentStreakDays: profile?.currentStreakDays,
+        },
+        habits,
+        goals,
+        tasksToday: tasks,
+        behaviourEvents: events,
+      };
+      await Share.share({
+        title: 'Discipline AI export',
+        message: JSON.stringify(payload, null, 2),
+      });
+      setSnack('Export ready — choose an app to save or send the file contents.');
+    } catch (e) {
+      setSnack(formatAuthError(e, 'Could not export data.'));
+    } finally {
+      setExporting(false);
+    }
   }
 
   async function confirmDeleteAccount() {
@@ -241,9 +273,11 @@ export function SettingsScreen({ navigation }: Props) {
           <View style={[styles.divider, { backgroundColor: palette.divider }]} />
           <SettingRow
             title="Export data"
-            subtitle="Request a copy of your records"
+            subtitle={exporting ? 'Preparing export…' : 'Share a copy of your records'}
             icon="download-outline"
-            onPress={exportData}
+            onPress={() => {
+              if (!exporting) void exportData();
+            }}
           />
         </AppCard>
 

@@ -21,6 +21,14 @@ export function todayDateKey(date = new Date()): string {
   ).padStart(2, '0')}`;
 }
 
+/** Shift a YYYY-MM-DD key by N local calendar days. */
+export function addDaysToDateKey(dateKey: string, days: number): string {
+  const [y, m, d] = dateKey.split('-').map(Number);
+  const dt = new Date(y ?? 1970, (m ?? 1) - 1, d ?? 1);
+  dt.setDate(dt.getDate() + days);
+  return todayDateKey(dt);
+}
+
 /**
  * Build a Date from a local calendar day + HH:mm.
  * Never append "Z" — that would treat the wall-clock time as UTC.

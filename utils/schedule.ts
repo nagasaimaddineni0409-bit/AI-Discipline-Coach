@@ -1,4 +1,5 @@
 import type { RepeatRule, ScheduleFrequency } from '../types';
+import { todayDateKey } from './date';
 
 export const WEEKDAYS: { index: number; short: string; label: string }[] = [
   { index: 0, short: 'Sun', label: 'Sunday' },
@@ -34,6 +35,21 @@ function monthsBetween(fromKey: string, toKey: string): number {
   const a = keyToUtc(fromKey);
   const b = keyToUtc(toKey);
   return (b.getUTCFullYear() - a.getUTCFullYear()) * 12 + (b.getUTCMonth() - a.getUTCMonth());
+}
+
+/**
+ * True when the habit's schedule window is fully over (no more future occurrences).
+ * Used to auto-archive one-shot / endDate habits from the active list.
+ */
+export function isHabitScheduleEnded(
+  rule: RepeatRule,
+  todayKey: string = todayDateKey(),
+): boolean {
+  if (rule.frequency === 'once') {
+    return Boolean(rule.startDate) && todayKey > rule.startDate!;
+  }
+  if (rule.endDate && todayKey > rule.endDate) return true;
+  return false;
 }
 
 /** Whether a habit/goal with this repeat rule is scheduled to occur on the given date. */

@@ -65,11 +65,23 @@ export class UserRepository extends FirestoreRepository {
     });
   }
 
-  async updateBdi(uid: string, score: number, weeklyDelta: number, monthlyDelta: number) {
+  async updateBdi(
+    uid: string,
+    score: number,
+    weeklyDelta: number,
+    monthlyDelta: number,
+    streaks?: { currentStreakDays: number; longestStreakDays: number },
+  ) {
     await this.updateProfile(uid, {
       bdiScore: score,
       bdiWeeklyDelta: weeklyDelta,
       bdiMonthlyDelta: monthlyDelta,
+      ...(streaks
+        ? {
+            currentStreakDays: streaks.currentStreakDays,
+            longestStreakDays: streaks.longestStreakDays,
+          }
+        : {}),
     });
   }
 }

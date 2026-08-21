@@ -114,7 +114,10 @@ export function ReportsScreen() {
     return behaviourEvents.filter((e) => e.createdAt >= `${month}T00:00:00.000Z`);
   }, [behaviourEvents]);
 
-  const weeklyInsights = useMemo(() => generateWeeklyInsights(weekEvents), [weekEvents]);
+  const weeklyInsights = useMemo(
+    () => generateWeeklyInsights(weekEvents, habits),
+    [weekEvents, habits],
+  );
   const monthlyInsights = useMemo(() => {
     const month = startOfMonth();
     const prevMonthDate = new Date(month);
@@ -123,8 +126,8 @@ export function ReportsScreen() {
     const previous = behaviourEvents.filter(
       (e) => e.createdAt >= `${prevKey}T00:00:00.000Z` && e.createdAt < `${month}T00:00:00.000Z`,
     );
-    return generateMonthlyTrendInsights(monthEvents, previous);
-  }, [behaviourEvents, monthEvents]);
+    return generateMonthlyTrendInsights(monthEvents, previous, habits);
+  }, [behaviourEvents, monthEvents, habits]);
 
   const history = useMemo(() => behaviourEvents.slice(0, 80), [behaviourEvents]);
   const todayStats = countActions(todayEvents);
@@ -300,14 +303,14 @@ export function ReportsScreen() {
               </Text>
             </AppCard>
             <AppCard>
-              <Text variant="titleMedium">Trends</Text>
+              <Text variant="titleMedium">What we noticed</Text>
               {monthlyInsights.length ? (
                 monthlyInsights.map((insight) => (
                   <InsightBlock key={insight.id} title={insight.text} evidence={insight.evidence} />
                 ))
               ) : (
                 <Text variant="bodySmall" style={styles.muted}>
-                  Keep responding to reminders for a month-over-month trend.
+                  No insights yet this month.
                 </Text>
               )}
             </AppCard>

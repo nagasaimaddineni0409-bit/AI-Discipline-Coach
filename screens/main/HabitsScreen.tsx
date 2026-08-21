@@ -54,9 +54,11 @@ export function HabitsScreen() {
 
   const sortedHabits = useMemo(
     () =>
-      [...habits].sort(
-        (a, b) => parseTimeToMinutes(a.reminder.time) - parseTimeToMinutes(b.reminder.time),
-      ),
+      [...habits]
+        .filter((h) => h.status === 'active')
+        .sort(
+          (a, b) => parseTimeToMinutes(a.reminder.time) - parseTimeToMinutes(b.reminder.time),
+        ),
     [habits],
   );
 

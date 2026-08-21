@@ -86,8 +86,8 @@ async function resolveRecipient(
 
 async function generateAndEmailWeeklyReport(
   uid: string,
-  opts: { sendEmail: boolean },
-): Promise<{ emailed: boolean; subject: string; to?: string }> {
+  opts: { sendEmail: boolean; resendApiKey?: string },
+): Promise<{ emailed: boolean; subject: string; to?: string; error?: string }> {
   const { weekStart, weekEnd } = weekWindow();
   const events = await loadWeekEvents(uid, weekStart);
   const recipient = await resolveRecipient(uid);
@@ -126,26 +126,34 @@ async function generateAndEmailWeeklyReport(
   }
   if (!recipient?.email) {
     logger.warn('No email on file for weekly report', { uid });
-    return { emailed: false, subject: report.subject };
+    return { emailed: false, subject: report.subject, error: 'No email on file' };
   }
 
-  const emailed = await sendReportEmail({
-    to: recipient.email,
-    subject: report.subject,
-    html: renderWeeklyEmailHtml(report),
-    text: renderWeeklyEmailText(report),
-  });
+  const sendResult = await sendReportEmail(
+    {
+      to: recipient.email,
+      subject: report.subject,
+      html: renderWeeklyEmailHtml(report),
+      text: renderWeeklyEmailText(report),
+    },
+    opts.resendApiKey,
+  );
 
   await reportRef.set(
     {
-      emailSentAt: emailed ? new Date().toISOString() : null,
+      emailSentAt: sendResult.ok ? new Date().toISOString() : null,
       emailTo: recipient.email,
-      emailError: emailed ? null : 'delivery_failed_or_unconfigured',
+      emailError: sendResult.ok ? null : sendResult.error ?? 'delivery_failed',
     },
     { merge: true },
   );
 
-  return { emailed, subject: report.subject, to: recipient.email };
+  return {
+    emailed: sendResult.ok,
+    subject: report.subject,
+    to: recipient.email,
+    error: sendResult.error,
+  };
 }
 
 function completionRate(events: BehaviourEventDoc[]): number {
@@ -199,8 +207,8 @@ export const scheduledWeeklyReports = onSchedule(
     secrets: [resendApiKey],
   },
   async () => {
-    // Ensure MAIL_FROM param is available to the mailer via process.env.
     process.env.MAIL_FROM = mailFrom.value();
+    const apiKey = resendApiKey.value();
     const usersSnap = await db.collection('users').limit(500).get();
     let emailed = 0;
     for (const userDoc of usersSnap.docs) {
@@ -208,7 +216,10 @@ export const scheduledWeeklyReports = onSchedule(
       const settings = await db.collection('settings').doc(uid).get();
       const weeklyEmailEnabled = settings.data()?.weeklyEmailEnabled !== false;
       try {
-        const result = await generateAndEmailWeeklyReport(uid, { sendEmail: weeklyEmailEnabled });
+        const result = await generateAndEmailWeeklyReport(uid, {
+          sendEmail: weeklyEmailEnabled,
+          resendApiKey: apiKey,
+        });
         if (result.emailed) emailed += 1;
       } catch (err) {
         logger.error('Weekly report failed for user', { uid, err });
@@ -229,14 +240,18 @@ export const requestWeeklyReportEmail = onCall(
     if (settings.data()?.weeklyEmailEnabled === false) {
       throw new HttpsError('failed-precondition', 'Weekly email reviews are turned off in Settings.');
     }
-    const result = await generateAndEmailWeeklyReport(uid, { sendEmail: true });
+    const result = await generateAndEmailWeeklyReport(uid, {
+      sendEmail: true,
+      resendApiKey: resendApiKey.value(),
+    });
     if (!result.to) {
       throw new HttpsError('failed-precondition', 'No email address is on file for this account.');
     }
     if (!result.emailed) {
       throw new HttpsError(
         'unavailable',
-        'The review was saved but email delivery is not configured yet. Ask the project owner to set RESEND_API_KEY or SMTP credentials on Cloud Functions.',
+        result.error ??
+          'The review was saved but email could not be delivered. Check Resend domain / test-mode recipient.',
       );
     }
     return { sent: true, to: result.to, subject: result.subject };

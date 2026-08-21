@@ -12,11 +12,13 @@ import {
   calculateBdi,
   computeConsistency,
   buildDailyCompletionFlags,
+  computeCurrentStreakDays,
 } from '../services/bdiService';
 import { useDataStore } from '../features/data/dataStore';
 import { localDateTimeIso } from '../utils/date';
 import { cancelAlarmsForTask, upsertReminderWithAlarm } from './alarmScheduler';
 import { useAlarmStore } from '../features/alarm/alarmStore';
+import { useAuthStore } from '../features/auth/authStore';
 
 function isActionable(task: Task): boolean {
   return task.status === 'pending' || task.status === 'snoozed';
@@ -34,9 +36,9 @@ async function settleRemindersForTask(userId: string, taskId: string): Promise<v
   await refreshUpcomingReminder(userId);
 }
 
-/** Pick the next reminder whose linked task is still actionable. */
+/** Pick the next reminder whose linked task is still actionable (today or lookahead). */
 export async function refreshUpcomingReminder(userId: string): Promise<Reminder | null> {
-  const candidates = await reminderRepository.listUpcoming(userId, 10);
+  const candidates = await reminderRepository.listUpcoming(userId, 30);
   const { tasks, habits } = useDataStore.getState();
   const activeHabitIds = new Set(
     habits.filter((h) => h.status === 'active').map((h) => h.id),
@@ -45,7 +47,7 @@ export async function refreshUpcomingReminder(userId: string): Promise<Reminder 
     candidates.find((r) => {
       const task = tasks.find((t) => t.id === r.taskId);
       if (!task) {
-        // Reminder without a loaded task — only keep if we can't prove it's orphaned.
+        // Lookahead reminders: task may not be in today's store — still show them.
         return true;
       }
       if (task.status !== 'pending' && task.status !== 'snoozed') return false;
@@ -207,14 +209,32 @@ async function refreshBdi(userId: string) {
   const goalCompletion =
     goals.filter((g) => g.progress >= g.target).length / Math.max(goals.length, 1);
   const weeklyFlags = buildDailyCompletionFlags(events, 7);
-  const monthlyFlags = buildDailyCompletionFlags(events, 30);
+  const monthlyFlags = buildDailyCompletionFlags(events, 90);
   const bdi = calculateBdi({
     events,
     goalCompletionRate: goalCompletion,
     weeklyConsistency: computeConsistency(weeklyFlags),
-    monthlyConsistency: computeConsistency(monthlyFlags),
+    monthlyConsistency: computeConsistency(buildDailyCompletionFlags(events, 30)),
   });
-  await userRepository.updateBdi(userId, bdi.score, bdi.weeklyChange, bdi.monthlyChange);
+  const currentStreakDays = computeCurrentStreakDays(monthlyFlags);
+  const profile = await userRepository.getProfile(userId);
+  const longestStreakDays = Math.max(profile?.longestStreakDays ?? 0, currentStreakDays);
+  await userRepository.updateBdi(userId, bdi.score, bdi.weeklyChange, bdi.monthlyChange, {
+    currentStreakDays,
+    longestStreakDays,
+  });
   useDataStore.getState().setBdi(bdi);
   useDataStore.getState().setBehaviourEvents(events);
+  // Keep Profile screen in sync without requiring re-login.
+  const authProfile = useAuthStore.getState().profile;
+  if (authProfile?.uid === userId) {
+    useAuthStore.getState().setProfile({
+      ...authProfile,
+      bdiScore: bdi.score,
+      bdiWeeklyDelta: bdi.weeklyChange,
+      bdiMonthlyDelta: bdi.monthlyChange,
+      currentStreakDays,
+      longestStreakDays,
+    });
+  }
 }
